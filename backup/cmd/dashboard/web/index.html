@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>備份管理系統</title>
+<style>
+:root{
+  --bg:#f8fafc;--surface:#fff;--surface2:#f1f5f9;--border:#e2e8f0;
+  --text:#0f172a;--text2:#64748b;--text3:#94a3b8;
+  --primary:#2563eb;--primary-h:#1d4ed8;--primary-light:#eff6ff;
+  --success:#16a34a;--success-bg:#f0fdf4;--success-border:#bbf7d0;
+  --danger:#dc2626;--danger-bg:#fef2f2;--danger-border:#fecaca;
+  --warning:#d97706;--warning-bg:#fffbeb;
+  --info:#0891b2;--info-bg:#ecfeff;
+  --sidebar-w:230px;--radius:8px;--rs:4px;
+  --shadow:0 1px 3px rgba(0,0,0,.1),0 1px 2px rgba(0,0,0,.06);
+  --shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:var(--text);background:var(--bg);line-height:1.5}
+a{text-decoration:none;color:inherit}button{cursor:pointer;font-family:inherit;font-size:14px;border:none;background:none}
+input,select,textarea{font-family:inherit;font-size:14px}
+/* Layout */
+#app{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:var(--sidebar-w);background:#0f172a;flex-shrink:0;display:flex;flex-direction:column;overflow-y:auto}
+.sidebar-logo{padding:18px 16px 14px;border-bottom:1px solid rgba(255,255,255,.08)}
+.sidebar-logo h1{color:#fff;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.sidebar-nav{padding:8px 0;flex:1}
+.nav-section{padding:16px 16px 5px;font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.8px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 16px;color:rgba(255,255,255,.65);cursor:pointer;transition:.15s;border-left:3px solid transparent;font-size:13px}
+.nav-item:hover{background:rgba(255,255,255,.06);color:#e2e8f0}
+.nav-item.active{background:rgba(37,99,235,.2);color:#fff;border-left-color:#3b82f6}
+.nav-item .ni{font-size:15px;width:18px;text-align:center}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:54px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.header-title{font-size:17px;font-weight:700}
+.header-right{display:flex;align-items:center;gap:10px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--success)}
+#content{flex:1;overflow-y:auto;padding:24px}
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
+.card-title{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:22px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;border-left:3px solid transparent}
+.stat-card.c-blue{border-left-color:var(--primary)}.stat-card.c-green{border-left-color:var(--success)}
+.stat-card.c-red{border-left-color:var(--danger)}.stat-card.c-yellow{border-left-color:var(--warning)}
+.stat-label{font-size:12px;color:var(--text2);font-weight:500;margin-bottom:6px}
+.stat-value{font-size:26px;font-weight:800;color:var(--text);line-height:1.1}
+.stat-sub{font-size:11px;color:var(--text3);margin-top:5px}
+/* Tables */
+.table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:13px;background:var(--surface)}
+thead th{padding:10px 14px;text-align:left;font-weight:600;color:var(--text2);background:var(--surface2);border-bottom:1px solid var(--border);white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+tbody td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:#fafbfc}
+.td-actions{display:flex;gap:5px;justify-content:flex-end;flex-wrap:nowrap}
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--rs);font-weight:500;transition:.15s;white-space:nowrap;font-size:13px}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn-xs{padding:3px 8px;font-size:11px}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-h)}
+.btn-secondary{background:var(--surface);border:1px solid var(--border);color:var(--text)}
+.btn-secondary:hover{background:var(--surface2)}
+.btn-danger{background:var(--danger-bg);color:var(--danger);border:1px solid var(--danger-border)}
+.btn-danger:hover{background:#fee2e2}
+.btn-success{background:var(--success-bg);color:var(--success);border:1px solid var(--success-border)}
+.btn-success:hover{background:#dcfce7}
+.btn-ghost{color:var(--text2);border:1px solid transparent}
+.btn-ghost:hover{background:var(--surface2);color:var(--text)}
+/* Badges */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge::before{content:'';width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.badge-success{background:var(--success-bg);color:var(--success)}.badge-success::before{background:var(--success)}
+.badge-failed{background:var(--danger-bg);color:var(--danger)}.badge-failed::before{background:var(--danger)}
+.badge-running{background:var(--info-bg);color:var(--info)}.badge-running::before{background:var(--info);animation:blink 1s infinite}
+.badge-on{background:var(--success-bg);color:var(--success)}.badge-on::before{background:var(--success)}
+.badge-off{background:var(--surface2);color:var(--text3)}.badge-off::before{background:var(--text3)}
+.badge-files{background:#eff6ff;color:#1d4ed8}.badge-files::before{background:#1d4ed8}
+.badge-database{background:#f5f3ff;color:#6d28d9}.badge-database::before{background:#6d28d9}
+.badge-system{background:#fff7ed;color:#c2410c}.badge-system::before{background:#c2410c}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+/* Forms */
+.form-group{margin-bottom:14px}
+.form-label{display:block;font-weight:500;margin-bottom:5px;font-size:13px}
+.form-hint{font-size:11px;color:var(--text3);margin-top:3px}
+.form-input{width:100%;padding:7px 11px;border:1px solid var(--border);border-radius:var(--rs);color:var(--text);background:var(--surface);outline:none;transition:.15s}
+.form-input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.form-input[disabled]{background:var(--surface2);color:var(--text3)}
+textarea.form-input{resize:vertical;min-height:72px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-check{display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px}
+.form-check input[type=checkbox]{width:15px;height:15px;accent-color:var(--primary);cursor:pointer}
+/* Toggle switch */
+.toggle-wrap{display:flex;align-items:center;gap:8px;cursor:pointer}
+.toggle-track{width:34px;height:18px;background:var(--text3);border-radius:99px;position:relative;transition:.2s;flex-shrink:0}
+.toggle-track.on{background:var(--primary)}
+.toggle-thumb{position:absolute;width:14px;height:14px;background:#fff;border-radius:50%;top:2px;left:2px;transition:.2s}
+.toggle-track.on .toggle-thumb{left:18px}
+/* Modal */
+#modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto}
+#modal-overlay.open{display:flex}
+.modal{background:var(--surface);border-radius:var(--radius);width:100%;max-width:560px;box-shadow:var(--shadow-md);margin:auto}
+.modal-lg{max-width:720px}
+.modal-header{padding:18px 22px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-header h2{font-size:15px;font-weight:700}
+.modal-close{font-size:18px;color:var(--text3);padding:4px 6px;border-radius:4px;line-height:1}
+.modal-close:hover{background:var(--surface2);color:var(--text)}
+.modal-body{padding:18px 22px;max-height:65vh;overflow-y:auto}
+.modal-footer{padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+/* Tabs */
+.tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto}
+.tab{padding:10px 16px;font-weight:500;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-size:13px;white-space:nowrap}
+.tab:hover{color:var(--text)}.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+/* Page header */
+.page-hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:10px}
+.page-hdr-left h1{font-size:19px;font-weight:700}.page-hdr-left p{font-size:12px;color:var(--text2);margin-top:3px}
+.page-hdr-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* Filter bar */
+.filter-bar{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+select.form-input{width:auto}
+/* Loading / Empty */
+.loading{text-align:center;padding:48px 24px;color:var(--text3)}
+.spinner{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:48px 24px;color:var(--text3)}
+.empty-icon{font-size:36px;margin-bottom:10px}
+/* Toasts */
+#toasts{position:fixed;bottom:20px;right:20px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{display:flex;align-items:center;gap:8px;padding:11px 16px;border-radius:var(--radius);color:#fff;font-size:13px;box-shadow:var(--shadow-md);animation:tslide .2s ease;pointer-events:all;max-width:340px}
+.toast.info{background:#334155}.toast.success{background:var(--success)}.toast.error{background:var(--danger)}.toast.warning{background:var(--warning)}
+@keyframes tslide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+/* Section gap */
+.sg{margin-bottom:20px}
+.divider{border:none;border-top:1px solid var(--border);margin:16px 0}
+.mono{font-family:'SF Mono',Fira Code,monospace;font-size:12px}
+.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;display:block}
+.flex-c{display:flex;align-items:center;gap:8px}
+.ml-a{margin-left:auto}
+/* Project cards on dashboard */
+.proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.proj-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;transition:.15s}
+.proj-card:hover{border-color:var(--primary);box-shadow:var(--shadow)}
+.proj-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+.proj-card h3{font-size:14px;font-weight:700}
+.proj-card p{font-size:12px;color:var(--text2);margin-top:3px}
+.proj-stats{display:flex;gap:16px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)}
+.proj-stat-item{display:flex;flex-direction:column;gap:2px}
+.proj-stat-item strong{font-size:14px;font-weight:700;color:var(--text)}
+/* Capabilities */
+.cap-section{margin-bottom:20px}
+.cap-section h3{font-size:13px;font-weight:700;margin-bottom:10px;color:var(--text)}
+.cap-item{background:var(--surface2);border-radius:var(--rs);padding:11px 14px;margin-bottom:8px}
+.cap-item-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.cap-item h4{font-size:13px;font-weight:600}
+.cap-item p{font-size:12px;color:var(--text2)}
+.avail-yes{color:var(--success);font-weight:600;font-size:12px}
+.avail-no{color:var(--danger);font-weight:600;font-size:12px}
+.tag{display:inline-flex;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:600;background:var(--primary-light);color:var(--primary);margin:2px}
+.route-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:6px}
+.route-item{display:flex;gap:8px;align-items:center;padding:7px 10px;background:var(--surface2);border-radius:var(--rs);font-size:12px}
+.method{font-weight:700;font-size:11px;padding:1px 6px;border-radius:3px;min-width:42px;text-align:center}
+.m-get{background:#dbeafe;color:#1d4ed8}.m-post{background:#dcfce7;color:#15803d}
+.m-put{background:#fef9c3;color:#a16207}.m-delete{background:#fee2e2;color:#b91c1c}
+.m-patch{background:#f3e8ff;color:#7e22ce}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1>💾 備份管理系統</h1>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">主要功能</div>
+      <div class="nav-item" data-p="dashboard"><span class="ni">📊</span>總覽</div>
+      <div class="nav-item" data-p="projects"><span class="ni">📁</span>專案管理</div>
+      <div class="nav-item" data-p="backups"><span class="ni">🗂</span>備份紀錄</div>
+      <div class="nav-section">系統</div>
+      <div class="nav-item" data-p="capabilities"><span class="ni">⚙️</span>系統功能</div>
+    </nav>
+  </aside>
+  <div class="main">
+    <header>
+      <div class="header-title" id="page-title">備份管理系統</div>
+      <div class="header-right">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-label" style="font-size:12px;color:var(--text2)">連線中...</span>
+      </div>
+    </header>
+    <main id="content"></main>
+  </div>
+</div>
+
+<div id="modal-overlay">
+  <div class="modal" id="modal-box">
+    <div class="modal-header">
+      <h2 id="modal-title"></h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════════
+   API
+═══════════════════════════════════════════════════════════════ */
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  if (r.status === 204) return null;
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+const apiGet    = p      => api('GET',    p);
+const apiPost   = (p, b) => api('POST',   p, b);
+const apiPut    = (p, b) => api('PUT',    p, b);
+const apiPatch  = (p, b) => api('PATCH',  p, b);
+const apiDelete = p      => api('DELETE', p);
+
+/* ═══════════════════════════════════════════════════════════════
+   Utils
+═══════════════════════════════════════════════════════════════ */
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  const icons = { success:'✓', error:'✕', warning:'⚠', info:'ℹ' };
+  el.innerHTML = `<span>${icons[type]||'ℹ'}</span><span>${esc(msg)}</span>`;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); }, 3200);
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtSize(b) {
+  if (!b) return '-';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+  return (b/1073741824).toFixed(2) + ' GB';
+}
+
+function fmtDate(d) {
+  if (!d) return '-';
+  return new Date(d).toLocaleString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+function fmtDur(s) {
+  if (!s) return '-';
+  if (s < 60) return s.toFixed(1) + 's';
+  return Math.floor(s/60) + 'm ' + (s % 60).toFixed(0) + 's';
+}
+
+function statusBadge(s) {
+  const map = { success:'badge-success', failed:'badge-failed', running:'badge-running' };
+  const labels = { success:'成功', failed:'失敗', running:'執行中' };
+  return `<span class="badge ${map[s]||'badge-off'}">${labels[s]||esc(s)}</span>`;
+}
+
+function typeBadge(t) {
+  const map = { files:'badge-files', database:'badge-database', system:'badge-system' };
+  const labels = { files:'檔案', database:'資料庫', system:'系統' };
+  return `<span class="badge ${map[t]||''}">${labels[t]||esc(t)}</span>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Modal
+═══════════════════════════════════════════════════════════════ */
+function openModal(title, body, footer = '', large = false) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = body;
+  document.getElementById('modal-footer').innerHTML = footer || `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>`;
+  document.getElementById('modal-box').className = 'modal' + (large ? ' modal-lg' : '');
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   Router & Nav
+═══════════════════════════════════════════════════════════════ */
+let currentPage = 'dashboard';
+let currentProjectId = null;
+let currentTab = 'targets';
+
+function navigate(page, projectId = null) {
+  currentPage = page;
+  currentProjectId = projectId;
+  currentTab = 'targets';
+  window.location.hash = projectId ? `#${page}/${projectId}` : `#${page}`;
+  renderPage();
+  updateNav();
+}
+
+function updateNav() {
+  const p = currentProjectId ? 'projects' : currentPage;
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.p === p);
+  });
+}
+
+document.querySelectorAll('.nav-item').forEach(el => {
+  el.addEventListener('click', () => navigate(el.dataset.p));
+});
+
+function setContent(html) {
+  document.getElementById('content').innerHTML = html;
+}
+
+function setTitle(t) {
+  document.getElementById('page-title').textContent = t;
+}
+
+function loading() {
+  setContent('<div class="loading"><div class="spinner"></div>載入中...</div>');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Dashboard
+═══════════════════════════════════════════════════════════════ */
+async function renderDashboard() {
+  setTitle('總覽');
+  loading();
+  try {
+    const [summary, records] = await Promise.all([
+      apiGet('/api/summary'),
+      apiGet('/api/backups?limit=8')
+    ]);
+    const projs = summary.projects || [];
+    const recs  = records.records  || [];
+
+    const totalBackups = projs.reduce((a, p) => a + (p.total_count||0), 0);
+    const totalFailed  = projs.reduce((a, p) => a + (p.failed_count||0), 0);
+    const totalGB      = projs.reduce((a, p) => a + (p.total_size_gb||0), 0);
+
+    setContent(`
+      <div class="stat-grid">
+        <div class="stat-card c-blue">
+          <div class="stat-label">專案總數</div>
+          <div class="stat-value">${projs.length}</div>
+          <div class="stat-sub">個備份專案</div>
+        </div>
+        <div class="stat-card c-green">
+          <div class="stat-label">備份總次數</div>
+          <div class="stat-value">${totalBackups}</div>
+          <div class="stat-sub">歷史備份紀錄</div>
+        </div>
+        <div class="stat-card c-red">
+          <div class="stat-label">失敗次數</div>
+          <div class="stat-value">${totalFailed}</div>
+          <div class="stat-sub">需要關注</div>
+        </div>
+        <div class="stat-card c-yellow">
+          <div class="stat-label">備份總大小</div>
+          <div class="stat-value">${totalGB.toFixed(1)}</div>
+          <div class="stat-sub">GB</div>
+        </div>
+      </div>
+
+      <div class="sg">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h2 style="font-size:15px;font-weight:700">專案狀態</h2>
+          <button class="btn btn-sm btn-primary" onclick="navigate('projects')">管理專案</button>
+        </div>
+        ${projs.length === 0 ? '<div class="empty"><div class="empty-icon">📭</div>尚無專案，請先新增備份專案</div>' :
+          `<div class="proj-grid">${projs.map(p => `
+          <div class="proj-card" onclick="navigate('project', ${p.project_id})">
+            <div class="proj-card-top">
+              <div>
+                <h3>${esc(p.project_name)}</h3>
+              </div>
+              ${statusBadge(p.last_status||'—')}
+            </div>
+            <div style="font-size:12px;color:var(--text2)">最後備份：${fmtDate(p.last_backup_at)}</div>
+            <div class="proj-stats">
+              <div class="proj-stat-item"><strong>${p.total_count||0}</strong>次備份</div>
+              <div class="proj-stat-item"><strong>${p.failed_count||0}</strong>次失敗</div>
+              <div class="proj-stat-item"><strong>${(p.total_size_gb||0).toFixed(2)}</strong> GB</div>
+            </div>
+          </div>`).join('')}</div>`}
+      </div>
+
+      <div class="sg">
+        <h2 style="font-size:15px;font-weight:700;margin-bottom:12px">最近備份紀錄</h2>
+        ${recs.length === 0 ? '<div class="empty"><div class="empty-icon">🗂</div>尚無備份紀錄</div>' : `
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>時間</th><th>耗時</th>
+            </tr></thead>
+            <tbody>${recs.map(r => `<tr>
+              <td><span class="truncate">${esc(r.project_name)}</span></td>
+              <td>${typeBadge(r.type)}</td>
+              <td>${statusBadge(r.status)}</td>
+              <td>${fmtSize(r.size_bytes)}</td>
+              <td style="white-space:nowrap">${fmtDate(r.created_at)}</td>
+              <td>${fmtDur(r.duration_sec)}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`}
+      </div>
+    `);
+  } catch(e) {
+    setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Projects List
+═══════════════════════════════════════════════════════════════ */
+async function renderProjects() {
+  setTitle('專案管理');
+  loading();
+  try {
+    const projects = await apiGet('/api/projects');
+    setContent(`
+      <div class="page-hdr">
+        <div class="page-hdr-left"><h1>專案管理</h1><p>新增、設定或刪除備份專案</p></div>
+        <div class="page-hdr-right">
+          <button class="btn btn-primary" onclick="showCreateProject()">＋ 新增專案</button>
+        </div>
+      </div>
+      ${(projects||[]).length === 0 ? '<div class="empty"><div class="empty-icon">📭</div>尚無專案<br><br><button class="btn btn-primary" onclick="showCreateProject()">新增第一個專案</button></div>' : `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>專案名稱</th><th>說明</th><th>NAS 路徑</th><th>狀態</th><th style="text-align:right">操作</th></tr></thead>
+          <tbody>${(projects||[]).map(p => `<tr>
+            <td><a href="#" style="font-weight:600;color:var(--primary)" onclick="navigate('project',${p.id});return false">${esc(p.name)}</a></td>
+            <td style="color:var(--text2)">${esc(p.description||'—')}</td>
+            <td><span class="mono truncate">${esc(p.nas_base)}</span></td>
+            <td><span class="badge ${p.enabled?'badge-on':'badge-off'}">${p.enabled?'啟用中':'已停用'}</span></td>
+            <td class="td-actions">
+              <button class="btn btn-xs btn-secondary" onclick="navigate('project',${p.id})">詳情</button>
+              <button class="btn btn-xs btn-secondary" onclick="showEditProject(${p.id})">編輯</button>
+              <button class="btn btn-xs btn-ghost" onclick="toggleProject(${p.id},${!p.enabled})">${p.enabled?'停用':'啟用'}</button>
+              <button class="btn btn-xs btn-danger" onclick="deleteProject(${p.id},'${esc(p.name)}')">刪除</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`}
+    `);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function showCreateProject() {
+  openModal('新增專案', projectForm(), `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitProject()">建立</button>
+  `);
+}
+
+async function showEditProject(id) {
+  try {
+    const p = await apiGet(`/api/projects/${id}`);
+    openModal('編輯專案', projectForm(p), `
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitProject(${id})">儲存</button>
+    `);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+function projectForm(p = {}) {
+  return `
+    <div class="form-group">
+      <label class="form-label">專案名稱 <span style="color:var(--danger)">*</span></label>
+      <input id="f-name" class="form-input" value="${esc(p.name||'')}" placeholder="例：project-a">
+    </div>
+    <div class="form-group">
+      <label class="form-label">說明</label>
+      <input id="f-desc" class="form-input" value="${esc(p.description||'')}" placeholder="選填">
+    </div>
+    <div class="form-group">
+      <label class="form-label">NAS 備份根目錄</label>
+      <input id="f-nas" class="form-input" value="${esc(p.nas_base||'/mnt/nas/backups')}" placeholder="/mnt/nas/backups">
+    </div>`;
+}
+
+async function submitProject(id = null) {
+  const body = {
+    name:        document.getElementById('f-name').value.trim(),
+    description: document.getElementById('f-desc').value.trim(),
+    nas_base:    document.getElementById('f-nas').value.trim() || '/mnt/nas/backups',
+    enabled:     true
+  };
+  if (!body.name) { toast('請填寫專案名稱','warning'); return; }
+  try {
+    if (id) { await apiPut(`/api/projects/${id}`, body); toast('專案已更新','success'); }
+    else { await apiPost('/api/projects', body); toast('專案已建立','success'); }
+    closeModal();
+    renderProjects();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function toggleProject(id, enabled) {
+  try {
+    await apiPatch(`/api/projects/${id}/toggle`, { enabled });
+    toast(enabled ? '專案已啟用' : '專案已停用', 'success');
+    renderProjects();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function deleteProject(id, name) {
+  openModal('確認刪除', `
+    <p>確定要刪除專案 <strong>${esc(name)}</strong> 嗎？</p>
+    <p style="color:var(--danger);margin-top:8px;font-size:12px">所有備份目標、排程、保留政策將一併刪除（備份紀錄保留）。</p>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-danger" onclick="confirmDeleteProject(${id})">確認刪除</button>
+  `);
+}
+
+async function confirmDeleteProject(id) {
+  try {
+    await apiDelete(`/api/projects/${id}`);
+    toast('專案已刪除','success');
+    closeModal();
+    renderProjects();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Project Detail
+═══════════════════════════════════════════════════════════════ */
+async function renderProjectDetail(id) {
+  loading();
+  try {
+    const proj = await apiGet(`/api/projects/${id}`);
+    setTitle(proj.name);
+    setContent(`
+      <div class="page-hdr">
+        <div class="page-hdr-left">
+          <div class="flex-c">
+            <button class="btn btn-sm btn-ghost" onclick="navigate('projects')">← 返回</button>
+            <h1>${esc(proj.name)}</h1>
+            <span class="badge ${proj.enabled?'badge-on':'badge-off'}">${proj.enabled?'啟用':'停用'}</span>
+          </div>
+          <p>${esc(proj.description||'')}</p>
+        </div>
+        <div class="page-hdr-right">
+          <button class="btn btn-sm btn-success" onclick="showTrigger(${id})">▶ 手動觸發備份</button>
+          <button class="btn btn-sm btn-secondary" onclick="showEditProject(${id})">編輯</button>
+        </div>
+      </div>
+      <div class="tabs" id="proj-tabs">
+        <div class="tab ${currentTab==='targets'?'active':''}" onclick="switchTab('targets')">備份目標</div>
+        <div class="tab ${currentTab==='schedules'?'active':''}" onclick="switchTab('schedules')">排程</div>
+        <div class="tab ${currentTab==='retention'?'active':''}" onclick="switchTab('retention')">保留政策</div>
+        <div class="tab ${currentTab==='records'?'active':''}" onclick="switchTab('records')">備份紀錄</div>
+      </div>
+      <div id="tab-content"></div>
+    `);
+    loadTab(id, currentTab);
+  } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('#proj-tabs .tab').forEach((el, i) => {
+    el.classList.toggle('active', el.textContent === { targets:'備份目標', schedules:'排程', retention:'保留政策', records:'備份紀錄' }[tab]);
+  });
+  document.querySelectorAll('#proj-tabs .tab').forEach(el => {
+    const map = { '備份目標':'targets','排程':'schedules','保留政策':'retention','備份紀錄':'records' };
+    el.classList.toggle('active', map[el.textContent] === tab);
+  });
+  loadTab(currentProjectId, tab);
+}
+
+function loadTab(id, tab) {
+  const tc = document.getElementById('tab-content');
+  if (!tc) return;
+  tc.innerHTML = '<div class="loading"><div class="spinner"></div>載入中...</div>';
+  if (tab === 'targets')   renderTargetsTab(id);
+  if (tab === 'schedules') renderSchedulesTab(id);
+  if (tab === 'retention') renderRetentionTab(id);
+  if (tab === 'records')   renderProjectRecords(id);
+}
+
+/* ── Targets Tab ── */
+async function renderTargetsTab(id) {
+  try {
+    const targets = await apiGet(`/api/projects/${id}/targets`);
+    const tc = document.getElementById('tab-content');
+    if (!tc) return;
+    tc.innerHTML = `
+      <div class="flex-c sg">
+        <h2 style="font-size:15px;font-weight:700">備份目標</h2>
+        <button class="btn btn-sm btn-primary ml-a" onclick="showAddTarget(${id})">＋ 新增目標</button>
+      </div>
+      ${(!targets||targets.length===0) ? '<div class="empty"><div class="empty-icon">🎯</div>尚無備份目標</div>' : `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>類型</th><th>標籤</th><th>設定摘要</th><th>狀態</th><th style="text-align:right">操作</th></tr></thead>
+          <tbody>${targets.map(t => `<tr>
+            <td>${typeBadge(t.type)}</td>
+            <td>${esc(t.label||'—')}</td>
+            <td><span class="mono" style="font-size:11px;color:var(--text2)">${configSummary(t.type, t.config)}</span></td>
+            <td><span class="badge ${t.enabled?'badge-on':'badge-off'}">${t.enabled?'啟用':'停用'}</span></td>
+            <td class="td-actions">
+              <button class="btn btn-xs btn-secondary" onclick="showEditTarget(${id},${t.id})">編輯</button>
+              <button class="btn btn-xs btn-danger" onclick="deleteTarget(${id},${t.id})">刪除</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`}
+    `;
+  } catch(e) { toast(e.message,'error'); }
+}
+
+function configSummary(type, cfg) {
+  try {
+    const c = typeof cfg === 'string' ? JSON.parse(cfg) : cfg;
+    if (type === 'files') return c.source || '';
+    if (type === 'database') return `${c.db_type||''}@${c.host||''}:${c.port||''} / ${c.name||''}`;
+    if (type === 'system') return (c.include||[]).join(', ');
+  } catch { return ''; }
+  return '';
+}
+
+function showAddTarget(projId) {
+  openModal('新增備份目標', targetForm('files'), `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitTarget(${projId})">建立</button>
+  `, true);
+  // Watch type change
+  document.getElementById('f-ttype').addEventListener('change', function() {
+    document.getElementById('target-config-fields').innerHTML = targetConfigFields(this.value);
+  });
+}
+
+async function showEditTarget(projId, tid) {
+  try {
+    const t = await apiGet(`/api/projects/${projId}/targets/${tid}`);
+    openModal('編輯備份目標', targetForm(t.type, t), `
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitTarget(${projId},${tid})">儲存</button>
+    `, true);
+    document.getElementById('f-ttype').addEventListener('change', function() {
+      document.getElementById('target-config-fields').innerHTML = targetConfigFields(this.value);
+    });
+  } catch(e) { toast(e.message,'error'); }
+}
+
+function targetForm(type = 'files', t = {}) {
+  const cfg = (() => { try { return typeof t.config === 'string' ? JSON.parse(t.config) : (t.config || {}); } catch { return {}; } })();
+  return `
+    <div class="form-group">
+      <label class="form-label">標籤</label>
+      <input id="f-tlabel" class="form-input" value="${esc(t.label||'')}" placeholder="例：主資料庫">
+    </div>
+    <div class="form-group">
+      <label class="form-label">備份類型</label>
+      <select id="f-ttype" class="form-input">
+        <option value="files"    ${type==='files'   ?'selected':''}>📄 檔案備份</option>
+        <option value="database" ${type==='database'?'selected':''}>🗄 資料庫備份</option>
+        <option value="system"   ${type==='system'  ?'selected':''}>🖥 系統備份</option>
+      </select>
+    </div>
+    <div id="target-config-fields">${targetConfigFields(type, cfg)}</div>
+  `;
+}
+
+function targetConfigFields(type, cfg = {}) {
+  if (type === 'files') return `
+    <div class="form-group">
+      <label class="form-label">來源目錄 <span style="color:var(--danger)">*</span></label>
+      <input id="f-source" class="form-input" value="${esc(cfg.source||'')}" placeholder="/var/www/uploads">
+    </div>
+    <div class="form-group">
+      <label class="form-label">排除清單（逗號分隔）</label>
+      <input id="f-exclude" class="form-input" value="${esc((cfg.exclude||[]).join(', '))}" placeholder="*.tmp, cache/">
+      <div class="form-hint">檔名或目錄名稱，支援萬用字元</div>
+    </div>`;
+  if (type === 'database') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">資料庫類型</label>
+        <select id="f-dbtype" class="form-input">
+          <option value="postgres" ${cfg.db_type==='postgres'?'selected':''}>PostgreSQL</option>
+          <option value="mysql"    ${cfg.db_type==='mysql'   ?'selected':''}>MySQL / MariaDB</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Port</label>
+        <input id="f-dbport" class="form-input" type="number" value="${esc(cfg.port||'5432')}" placeholder="5432">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">主機位址 <span style="color:var(--danger)">*</span></label>
+        <input id="f-dbhost" class="form-input" value="${esc(cfg.host||'')}" placeholder="db-host">
+      </div>
+      <div class="form-group">
+        <label class="form-label">資料庫名稱 <span style="color:var(--danger)">*</span></label>
+        <input id="f-dbname" class="form-input" value="${esc(cfg.name||'')}" placeholder="mydb">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">使用者名稱</label>
+        <input id="f-dbuser" class="form-input" value="${esc(cfg.user||'')}" placeholder="backup_user">
+      </div>
+      <div class="form-group">
+        <label class="form-label">密碼環境變數</label>
+        <input id="f-dbpass" class="form-input" value="${esc(cfg.password_env||'')}" placeholder="MY_DB_PASS">
+        <div class="form-hint">填入 .env 中的環境變數名稱</div>
+      </div>
+    </div>`;
+  if (type === 'system') return `
+    <div class="form-group">
+      <label class="form-label">備份目錄（逗號分隔）</label>
+      <input id="f-include" class="form-input" value="${esc((cfg.include||['/etc','/home','/var/www']).join(', '))}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">排除目錄（逗號分隔）</label>
+      <input id="f-sys-exclude" class="form-input" value="${esc((cfg.exclude||['/proc','/sys','/dev','/tmp','/run','/mnt']).join(', '))}">
+    </div>
+    <div class="form-group">
+      <label class="form-check"><input type="checkbox" id="f-pkg" ${cfg.backup_packages!==false?'checked':''}> 備份已安裝套件清單（dpkg）</label>
+      <label class="form-check"><input type="checkbox" id="f-svc" ${cfg.backup_services!==false?'checked':''}> 備份服務清單（systemd）</label>
+    </div>`;
+  return '';
+}
+
+function buildTargetConfig(type) {
+  const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const c = id => { const el = document.getElementById(id); return el ? el.checked : false; };
+  const split = s => s.split(',').map(x=>x.trim()).filter(Boolean);
+  if (type === 'files')    return { source: v('f-source'), compress: 'gzip', exclude: split(v('f-exclude')) };
+  if (type === 'database') return { db_type: v('f-dbtype'), host: v('f-dbhost'), port: parseInt(v('f-dbport'))||5432, name: v('f-dbname'), user: v('f-dbuser'), password_env: v('f-dbpass') };
+  if (type === 'system')   return { include: split(v('f-include')), exclude: split(v('f-sys-exclude')), backup_packages: c('f-pkg'), backup_services: c('f-svc') };
+  return {};
+}
+
+async function submitTarget(projId, tid = null) {
+  const type = document.getElementById('f-ttype').value;
+  const label = document.getElementById('f-tlabel').value.trim();
+  const config = buildTargetConfig(type);
+  if (type === 'files' && !config.source) { toast('請填寫來源目錄','warning'); return; }
+  if (type === 'database' && (!config.host || !config.name)) { toast('請填寫主機與資料庫名稱','warning'); return; }
+  const body = { type, label, config, enabled: true };
+  try {
+    if (tid) { await apiPut(`/api/projects/${projId}/targets/${tid}`, body); toast('已更新','success'); }
+    else { await apiPost(`/api/projects/${projId}/targets`, body); toast('已新增','success'); }
+    closeModal();
+    renderTargetsTab(projId);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function deleteTarget(projId, tid) {
+  if (!confirm('確定要刪除此備份目標？')) return;
+  try {
+    await apiDelete(`/api/projects/${projId}/targets/${tid}`);
+    toast('已刪除','success');
+    renderTargetsTab(projId);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+/* ── Schedules Tab ── */
+async function renderSchedulesTab(id) {
+  try {
+    const schedules = await apiGet(`/api/projects/${id}/schedules`);
+    const tc = document.getElementById('tab-content');
+    if (!tc) return;
+    tc.innerHTML = `
+      <div class="flex-c sg">
+        <h2 style="font-size:15px;font-weight:700">排程設定</h2>
+        <button class="btn btn-sm btn-primary ml-a" onclick="showAddSchedule(${id})">＋ 新增排程</button>
+      </div>
+      ${(!schedules||schedules.length===0) ? '<div class="empty"><div class="empty-icon">🕐</div>尚無排程</div>' : `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>標籤</th><th>Cron 表達式</th><th>備份類型</th><th>狀態</th><th>最後執行</th><th>下次執行</th><th style="text-align:right">操作</th></tr></thead>
+          <tbody>${schedules.map(s => `<tr>
+            <td>${esc(s.label||'—')}</td>
+            <td><span class="mono">${esc(s.cron_expr)}</span></td>
+            <td>${(s.target_types||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
+            <td><span class="badge ${s.enabled?'badge-on':'badge-off'}">${s.enabled?'啟用':'停用'}</span></td>
+            <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at)}</td>
+            <td style="font-size:12px;white-space:nowrap">${fmtDate(s.next_run_at)}</td>
+            <td class="td-actions">
+              <button class="btn btn-xs btn-secondary" onclick="showEditSchedule(${id},${s.id})">編輯</button>
+              <button class="btn btn-xs btn-ghost" onclick="toggleSchedule(${id},${s.id},${!s.enabled})">${s.enabled?'停用':'啟用'}</button>
+              <button class="btn btn-xs btn-danger" onclick="deleteSchedule(${id},${s.id})">刪除</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div class="cap-item" style="margin-top:12px">
+        <p style="font-size:12px;color:var(--text2)">⏰ Cron 格式：<span class="mono">分 時 日 月 星期</span>　
+        範例：<span class="mono">0 2 * * *</span> = 每天凌晨 2:00 ｜ <span class="mono">0 3 * * 1</span> = 每週一 3:00 ｜ <span class="mono">0 */6 * * *</span> = 每 6 小時</p>
+      </div>`}
+    `;
+  } catch(e) { toast(e.message,'error'); }
+}
+
+function scheduleForm(s = {}) {
+  const types = s.target_types || ['all'];
+  return `
+    <div class="form-group">
+      <label class="form-label">標籤</label>
+      <input id="f-slabel" class="form-input" value="${esc(s.label||'')}" placeholder="例：每日備份">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Cron 表達式 <span style="color:var(--danger)">*</span></label>
+      <input id="f-scron" class="form-input" value="${esc(s.cron_expr||'')}" placeholder="0 2 * * *">
+      <div class="form-hint">格式：分 時 日 月 星期（例：0 2 * * * = 每天凌晨 2:00）</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">備份類型</label>
+      <select id="f-stypes" class="form-input">
+        <option value="all"      ${types.includes('all')     ?'selected':''}>全部</option>
+        <option value="files"    ${types.includes('files')   ?'selected':''}>僅檔案</option>
+        <option value="database" ${types.includes('database')?'selected':''}>僅資料庫</option>
+        <option value="system"   ${types.includes('system')  ?'selected':''}>僅系統</option>
+      </select>
+    </div>`;
+}
+
+function showAddSchedule(projId) {
+  openModal('新增排程', scheduleForm(), `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitSchedule(${projId})">建立</button>
+  `);
+}
+
+async function showEditSchedule(projId, sid) {
+  try {
+    const s = await apiGet(`/api/projects/${projId}/schedules/${sid}`);
+    openModal('編輯排程', scheduleForm(s), `
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitSchedule(${projId},${sid})">儲存</button>
+    `);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function submitSchedule(projId, sid = null) {
+  const cron_expr = document.getElementById('f-scron').value.trim();
+  if (!cron_expr) { toast('請填寫 Cron 表達式','warning'); return; }
+  const body = {
+    label: document.getElementById('f-slabel').value.trim(),
+    cron_expr,
+    target_types: [document.getElementById('f-stypes').value],
+    enabled: true
+  };
+  try {
+    if (sid) { await apiPut(`/api/projects/${projId}/schedules/${sid}`, body); toast('排程已更新','success'); }
+    else { await apiPost(`/api/projects/${projId}/schedules`, body); toast('排程已建立','success'); }
+    closeModal();
+    renderSchedulesTab(projId);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function toggleSchedule(projId, sid, enabled) {
+  try {
+    await apiPatch(`/api/projects/${projId}/schedules/${sid}/toggle`, { enabled });
+    toast(enabled ? '排程已啟用' : '排程已停用', 'success');
+    renderSchedulesTab(projId);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function deleteSchedule(projId, sid) {
+  if (!confirm('確定要刪除此排程？')) return;
+  try {
+    await apiDelete(`/api/projects/${projId}/schedules/${sid}`);
+    toast('排程已刪除','success');
+    renderSchedulesTab(projId);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+/* ── Retention Tab ── */
+async function renderRetentionTab(id) {
+  try {
+    const policies = await apiGet(`/api/projects/${id}/retention`);
+    const pMap = {};
+    (policies||[]).forEach(p => pMap[p.target_type] = p);
+    const def = (type, field) => (pMap[type] || pMap['all'] || {})[field] || (field==='keep_daily'?7:field==='keep_weekly'?4:12);
+    const tc = document.getElementById('tab-content');
+    if (!tc) return;
+    tc.innerHTML = `
+      <div class="sg">
+        <h2 style="font-size:15px;font-weight:700;margin-bottom:14px">保留政策</h2>
+        <div class="card">
+          ${['all','files','database','system'].map(type => `
+          <div style="margin-bottom:18px">
+            <div style="font-weight:600;font-size:13px;margin-bottom:10px;display:flex;align-items:center;gap:6px">
+              ${type==='all'?'🌐 全域（預設）':type==='files'?'📄 檔案':type==='database'?'🗄 資料庫':'🖥 系統'}
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="margin-bottom:0">
+                <label class="form-label">每日保留</label>
+                <input class="form-input" id="r-${type}-daily" type="number" min="1" value="${def(type,'keep_daily')}">
+                <div class="form-hint">保留最近幾天的備份</div>
+              </div>
+              <div class="form-group" style="margin-bottom:0">
+                <label class="form-label">每週保留</label>
+                <input class="form-input" id="r-${type}-weekly" type="number" min="1" value="${def(type,'keep_weekly')}">
+              </div>
+              <div class="form-group" style="margin-bottom:0">
+                <label class="form-label">每月保留</label>
+                <input class="form-input" id="r-${type}-monthly" type="number" min="1" value="${def(type,'keep_monthly')}">
+              </div>
+            </div>
+          </div>
+          <div class="divider"></div>`).join('')}
+          <button class="btn btn-primary" onclick="saveRetention(${id})">儲存保留政策</button>
+        </div>
+      </div>
+    `;
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function saveRetention(projId) {
+  const types = ['all','files','database','system'];
+  const policies = types.map(t => ({
+    target_type:  t,
+    keep_daily:   parseInt(document.getElementById(`r-${t}-daily`).value)   || 7,
+    keep_weekly:  parseInt(document.getElementById(`r-${t}-weekly`).value)  || 4,
+    keep_monthly: parseInt(document.getElementById(`r-${t}-monthly`).value) || 12
+  }));
+  try {
+    await apiPut(`/api/projects/${projId}/retention`, policies);
+    toast('保留政策已儲存','success');
+  } catch(e) { toast(e.message,'error'); }
+}
+
+/* ── Project Records Tab ── */
+async function renderProjectRecords(id) {
+  try {
+    const data = await apiGet(`/api/projects/${id}/backups?limit=30`);
+    const recs = data.records || [];
+    const tc = document.getElementById('tab-content');
+    if (!tc) return;
+    tc.innerHTML = `
+      <div class="flex-c sg">
+        <h2 style="font-size:15px;font-weight:700">備份紀錄</h2>
+        <button class="btn btn-sm btn-success ml-a" onclick="showTrigger(${id})">▶ 手動觸發備份</button>
+      </div>
+      ${recs.length===0 ? '<div class="empty"><div class="empty-icon">🗂</div>尚無備份紀錄</div>' : `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>類型</th><th>檔案名稱</th><th>狀態</th><th>大小</th><th>耗時</th><th>觸發方式</th><th>時間</th><th></th></tr></thead>
+          <tbody>${recs.map(r => `<tr>
+            <td>${typeBadge(r.type)}</td>
+            <td><span class="mono truncate">${esc(r.filename)}</span></td>
+            <td>${statusBadge(r.status)}</td>
+            <td>${fmtSize(r.size_bytes)}</td>
+            <td>${fmtDur(r.duration_sec)}</td>
+            <td><span class="badge badge-off">${esc(r.triggered_by)}</span></td>
+            <td style="font-size:12px;white-space:nowrap">${fmtDate(r.created_at)}</td>
+            <td><button class="btn btn-xs btn-danger" onclick="deleteRecord(${r.id},${id})">刪除</button></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`}
+    `;
+  } catch(e) { toast(e.message,'error'); }
+}
+
+/* ── Trigger Modal ── */
+function showTrigger(projId) {
+  openModal('手動觸發備份', `
+    <div class="form-group">
+      <label class="form-label">備份類型</label>
+      <select id="f-trigger-type" class="form-input">
+        <option value="all">全部（files + database + system）</option>
+        <option value="files">僅檔案備份</option>
+        <option value="database">僅資料庫備份</option>
+        <option value="system">僅系統備份</option>
+      </select>
+    </div>
+    <p style="font-size:12px;color:var(--text2)">觸發後備份將在背景執行，可在「備份紀錄」頁面查看進度。</p>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-success" onclick="triggerBackup(${projId})">▶ 立即備份</button>
+  `);
+}
+
+async function triggerBackup(projId) {
+  const type = document.getElementById('f-trigger-type').value;
+  try {
+    const r = await apiPost('/api/backups/trigger', { project_id: projId, target_type: type });
+    toast(r.message || '備份已觸發', 'success');
+    closeModal();
+    if (currentProjectId === projId) loadTab(projId, 'records');
+  } catch(e) { toast(e.message,'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   All Backups
+═══════════════════════════════════════════════════════════════ */
+let backupFilter = { type: '', status: '', limit: 20, offset: 0 };
+
+async function renderBackups() {
+  setTitle('備份紀錄');
+  loading();
+  try {
+    const [data, projects] = await Promise.all([
+      apiGet(`/api/backups?type=${backupFilter.type}&status=${backupFilter.status}&limit=${backupFilter.limit}&offset=${backupFilter.offset}`),
+      apiGet('/api/projects')
+    ]);
+    const recs  = data.records || [];
+    const total = data.total   || 0;
+    const pages = Math.ceil(total / backupFilter.limit);
+    const curPage = Math.floor(backupFilter.offset / backupFilter.limit) + 1;
+
+    const projOptions = (projects||[]).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+
+    setContent(`
+      <div class="page-hdr">
+        <div class="page-hdr-left"><h1>備份紀錄</h1><p>共 ${total} 筆</p></div>
+      </div>
+      <div class="filter-bar">
+        <select class="form-input" id="f-btype" onchange="applyBackupFilter()" style="min-width:120px">
+          <option value="">全部類型</option>
+          <option value="files"    ${backupFilter.type==='files'   ?'selected':''}>檔案</option>
+          <option value="database" ${backupFilter.type==='database'?'selected':''}>資料庫</option>
+          <option value="system"   ${backupFilter.type==='system'  ?'selected':''}>系統</option>
+        </select>
+        <select class="form-input" id="f-bstatus" onchange="applyBackupFilter()" style="min-width:120px">
+          <option value="">全部狀態</option>
+          <option value="success" ${backupFilter.status==='success'?'selected':''}>成功</option>
+          <option value="failed"  ${backupFilter.status==='failed' ?'selected':''}>失敗</option>
+          <option value="running" ${backupFilter.status==='running'?'selected':''}>執行中</option>
+        </select>
+        <button class="btn btn-sm btn-secondary" onclick="clearBackupFilter()">清除篩選</button>
+        <span style="font-size:12px;color:var(--text2);margin-left:auto">第 ${curPage}/${pages||1} 頁</span>
+      </div>
+      ${recs.length===0 ? '<div class="empty"><div class="empty-icon">🗂</div>沒有符合條件的備份紀錄</div>' : `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>專案</th><th>類型</th><th>檔案名稱</th><th>狀態</th><th>大小</th><th>耗時</th><th>觸發方式</th><th>时間</th><th></th></tr></thead>
+          <tbody>${recs.map(r => `<tr>
+            <td><span style="font-weight:600">${esc(r.project_name)}</span></td>
+            <td>${typeBadge(r.type)}</td>
+            <td><span class="mono truncate">${esc(r.filename)}</span></td>
+            <td>${statusBadge(r.status)}</td>
+            <td>${fmtSize(r.size_bytes)}</td>
+            <td>${fmtDur(r.duration_sec)}</td>
+            <td><span class="badge badge-off">${esc(r.triggered_by||'—')}</span></td>
+            <td style="font-size:12px;white-space:nowrap">${fmtDate(r.created_at)}</td>
+            <td><button class="btn btn-xs btn-danger" onclick="deleteRecord(${r.id})">刪除</button></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap">
+        ${curPage > 1 ? `<button class="btn btn-sm btn-secondary" onclick="backupPage(${curPage-2})">← 上一頁</button>` : ''}
+        <span style="line-height:32px;font-size:13px;color:var(--text2)">第 ${curPage} / ${pages||1} 頁（共 ${total} 筆）</span>
+        ${curPage < pages ? `<button class="btn btn-sm btn-secondary" onclick="backupPage(${curPage})">下一頁 →</button>` : ''}
+      </div>`}
+    `);
+  } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
+}
+
+function applyBackupFilter() {
+  backupFilter.type   = document.getElementById('f-btype'  )?.value || '';
+  backupFilter.status = document.getElementById('f-bstatus')?.value || '';
+  backupFilter.offset = 0;
+  renderBackups();
+}
+
+function clearBackupFilter() {
+  backupFilter = { type:'', status:'', limit:20, offset:0 };
+  renderBackups();
+}
+
+function backupPage(page) {
+  backupFilter.offset = page * backupFilter.limit;
+  renderBackups();
+}
+
+async function deleteRecord(id, projId = null) {
+  if (!confirm('確定刪除此備份紀錄？（不會刪除 NAS 上的實體檔案）')) return;
+  try {
+    await apiDelete(`/api/backups/${id}`);
+    toast('備份紀錄已刪除','success');
+    if (projId) renderProjectRecords(projId);
+    else renderBackups();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Capabilities
+═══════════════════════════════════════════════════════════════ */
+async function renderCapabilities() {
+  setTitle('系統功能');
+  loading();
+  try {
+    const data = await apiGet('/api/capabilities');
+    const cap  = data.capabilities;
+    const methodClass = m => ({'GET':'m-get','POST':'m-post','PUT':'m-put','DELETE':'m-delete','PATCH':'m-patch'}[m]||'m-get');
+
+    setContent(`
+      <div class="page-hdr">
+        <div class="page-hdr-left"><h1>系統功能</h1><p>版本 ${esc(data.version)} ｜ 建置時間 ${fmtDate(data.build_time)}</p></div>
+      </div>
+
+      <div class="sg">
+        <div class="card-title">備份功能支援</div>
+        ${(cap.backup_types||[]).map(bt => `
+        <div class="cap-item">
+          <div class="cap-item-top">
+            <h4>${esc(bt.type==='files'?'📄 檔案備份':bt.type==='database'?'🗄 資料庫備份':'🖥 系統備份')}</h4>
+            <span class="${bt.available?'avail-yes':'avail-no'}">${bt.available?'✓ 可用':'✕ 不可用'}</span>
+          </div>
+          <p>${esc(bt.description)}</p>
+          ${bt.supported ? `<div style="margin-top:8px">${bt.supported.map(s=>`
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px">
+              <span class="${s.available?'avail-yes':'avail-no'}">${s.available?'✓':'✕'}</span>
+              <strong>${esc(s.db_type)}</strong>
+              <span style="color:var(--text2)">${esc(s.description)}</span>
+              ${s.version?`<span class="mono" style="color:var(--text3)">${esc(s.version)}</span>`:''}
+            </div>`).join('')}</div>` : ''}
+          <div style="margin-top:8px">${(bt.config_fields||[]).map(f=>`<span class="tag">${esc(f)}</span>`).join('')}</div>
+        </div>`).join('')}
+      </div>
+
+      <div class="sg" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div class="card-title">排程器</div>
+          <div class="cap-item">
+            <p>${esc(cap.scheduler?.description||'')}</p>
+            <p style="margin-top:6px"><strong>格式：</strong><span class="mono">${esc(cap.scheduler?.cron_format||'')}</span></p>
+            <div style="margin-top:8px">${(cap.scheduler?.examples||[]).map(e=>`
+              <div style="display:flex;gap:10px;font-size:12px;margin-top:4px">
+                <span class="mono" style="min-width:110px;color:var(--primary)">${esc(e.expr)}</span>
+                <span style="color:var(--text2)">${esc(e.desc)}</span>
+              </div>`).join('')}</div>
+          </div>
+        </div>
+        <div>
+          <div class="card-title">儲存與通知</div>
+          <div class="cap-item">
+            <p><strong>壓縮格式：</strong>${(cap.storage?.compress_formats||[]).join(', ')}</p>
+            <p><strong>驗證碼：</strong>${esc(cap.storage?.checksum||'')}</p>
+            <p><strong>NAS 路徑：</strong><span class="mono">${esc(cap.storage?.nas_mount||'')}</span></p>
+          </div>
+          <div class="cap-item" style="margin-top:8px">
+            <p><strong>通知管道：</strong>${(cap.notifications?.supported||[]).join(', ')}</p>
+            <p><strong>觸發時機：</strong>${(cap.notifications?.triggers||[]).join(', ')}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="sg">
+        <div class="card-title">API 路由清單</div>
+        <div class="route-list">
+          ${(cap.api?.routes||[]).map(r=>`
+          <div class="route-item">
+            <span class="method ${methodClass(r.method)}">${esc(r.method)}</span>
+            <span class="mono" style="flex:1;color:var(--text)">${esc(r.path)}</span>
+            <span style="color:var(--text2);font-size:11px">${esc(r.desc)}</span>
+          </div>`).join('')}
+        </div>
+      </div>
+    `);
+  } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Init
+═══════════════════════════════════════════════════════════════ */
+function renderPage() {
+  if (currentPage === 'dashboard')     renderDashboard();
+  else if (currentPage === 'projects') renderProjects();
+  else if (currentPage === 'project')  renderProjectDetail(currentProjectId);
+  else if (currentPage === 'backups')  renderBackups();
+  else if (currentPage === 'capabilities') renderCapabilities();
+  else renderDashboard();
+}
+
+// Health check
+async function checkHealth() {
+  try {
+    await fetch('/healthz');
+    document.getElementById('status-dot').style.background = 'var(--success)';
+    document.getElementById('status-label').textContent = '服務正常';
+  } catch {
+    document.getElementById('status-dot').style.background = 'var(--danger)';
+    document.getElementById('status-label').textContent = '無法連線';
+  }
+}
+
+// Parse initial hash
+(function init() {
+  const hash = window.location.hash.replace('#','');
+  if (hash.startsWith('project/')) {
+    const id = parseInt(hash.split('/')[1]);
+    if (id) { currentPage = 'project'; currentProjectId = id; }
+  } else if (hash) {
+    currentPage = hash;
+  }
+  updateNav();
+  renderPage();
+  checkHealth();
+  setInterval(checkHealth, 30000);
+})();
+</script>
+</body>
+</html>

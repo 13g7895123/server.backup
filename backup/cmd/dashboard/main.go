@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"embed"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +17,9 @@ import (
 	"backup-manager/internal/scheduler"
 	"backup-manager/internal/store"
 )
+
+//go:embed web/*
+var webFS embed.FS
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -58,6 +63,13 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+
+	// 前端靜態檔案
+	webSub, err := fs.Sub(webFS, "web")
+	if err != nil {
+		log.Fatalf("無法載入前端資源: %v", err)
+	}
+	mux.Handle("/", http.FileServer(http.FS(webSub)))
 
 	srv := &http.Server{
 		Addr:         addr,
