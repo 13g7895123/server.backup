@@ -1,0 +1,28 @@
+[Unit]
+Description=Backup Manager Host Agent
+Documentation=https://github.com/your-org/backup-manager
+# 需要 Docker 服務（執行 docker exec dump）
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+# 讀取 /etc/backup-agent/env 作為環境設定
+EnvironmentFile=/etc/backup-agent/env
+ExecStart=/usr/local/bin/backup-agent
+Restart=always
+RestartSec=10s
+
+# 以 root 執行以確保可存取所有檔案路徑及 docker socket
+User=root
+
+# 日誌
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=backup-agent
+
+# 資源限制（依需求調整）
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

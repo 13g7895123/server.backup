@@ -441,11 +441,13 @@ async function renderProjects() {
       ${(projects||[]).length === 0 ? '<div class="empty"><div class="empty-icon">📭</div>尚無專案<br><br><button class="btn btn-primary" onclick="showCreateProject()">新增第一個專案</button></div>' : `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>專案名稱</th><th>說明</th><th>NAS 路徑</th><th>狀態</th><th style="text-align:right">操作</th></tr></thead>
+          <thead><tr><th>專案名稱</th><th>說明</th><th>專案路徑</th><th>NAS 路徑</th><th>資料庫</th><th>狀態</th><th style="text-align:right">操作</th></tr></thead>
           <tbody>${(projects||[]).map(p => `<tr>
             <td><a href="#" style="font-weight:600;color:var(--primary)" onclick="navigate('project',${p.id});return false">${esc(p.name)}</a></td>
             <td style="color:var(--text2)">${esc(p.description||'—')}</td>
+            <td><span class="mono truncate">${esc(p.project_path||'—')}</span></td>
             <td><span class="mono truncate">${esc(p.nas_base)}</span></td>
+            <td>${p.docker_db_container ? `<span class="badge badge-database">🐳 ${esc(p.docker_db_container)}</span>` : p.db_type ? `<span class="badge badge-database">${esc(p.db_type)}@${esc(p.db_host)}</span>` : '<span style="color:var(--text3)">—</span>'}</td>
             <td><span class="badge ${p.enabled?'badge-on':'badge-off'}">${p.enabled?'啟用中':'已停用'}</span></td>
             <td class="td-actions">
               <button class="btn btn-xs btn-secondary" onclick="navigate('project',${p.id})">詳情</button>
@@ -458,6 +460,11 @@ async function renderProjects() {
       </div>`}
     `);
   } catch(e) { toast(e.message, 'error'); }
+}
+
+function toggleDbMode(mode) {
+  document.getElementById('db-docker-fields').style.display = mode === 'docker' ? 'block' : 'none';
+  document.getElementById('db-direct-fields').style.display = mode === 'direct' ? 'block' : 'none';
 }
 
 function showCreateProject() {
@@ -478,6 +485,7 @@ async function showEditProject(id) {
 }
 
 function projectForm(p = {}) {
+  const dbMode = p.docker_db_container ? 'docker' : (p.db_type && !p.docker_db_container ? 'direct' : '');
   return `
     <div class="form-group">
       <label class="form-label">專案名稱 <span style="color:var(--danger)">*</span></label>
@@ -488,18 +496,122 @@ function projectForm(p = {}) {
       <input id="f-desc" class="form-input" value="${esc(p.description||'')}" placeholder="選填">
     </div>
     <div class="form-group">
+      <label class="form-label">專案路徑（Host 上的專案根目錄）</label>
+      <input id="f-path" class="form-input" value="${esc(p.project_path||'')}" placeholder="/var/www/myapp">
+      <div class="form-hint">用於識別專案位置，也會作為備份目錄的基礎路徑</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">備份目錄（逗號分隔）</label>
+      <input id="f-bdirs" class="form-input" value="${esc((p.backup_dirs||[]).join(', '))}" placeholder="uploads, storage, public/media">
+      <div class="form-hint">填入要備份的資料夾（相對於專案路徑，或填絕對路徑）。留空則備份整個專案路徑</div>
+    </div>
+    <div class="form-group">
       <label class="form-label">NAS 備份根目錄</label>
       <input id="f-nas" class="form-input" value="${esc(p.nas_base||'/mnt/nas/backups')}" placeholder="/mnt/nas/backups">
+    </div>
+    <hr class="divider">
+    <div style="font-weight:600;font-size:13px;margin-bottom:12px">🗄 資料庫設定（選填）</div>
+    <div class="form-group">
+      <label class="form-label">連線方式</label>
+      <select id="f-dbmode" class="form-input" onchange="toggleDbMode(this.value)">
+        <option value=""      ${!dbMode?'selected':''}>不設定資料庫</option>
+        <option value="docker" ${dbMode==='docker'?'selected':''}>Docker Container 名稱</option>
+        <option value="direct" ${dbMode==='direct'?'selected':''}>直接連線（host / port）</option>
+      </select>
+    </div>
+    <div id="db-docker-fields" style="display:${dbMode==='docker'?'block':'none'}">
+      <div class="form-group">
+        <label class="form-label">資料庫類型</label>
+        <select id="f-dbtype-d" class="form-input">
+          <option value="postgres" ${p.db_type==='postgres'?'selected':''}>PostgreSQL</option>
+          <option value="mysql"    ${p.db_type==='mysql'   ?'selected':''}>MySQL / MariaDB</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Docker Container 名稱 <span style="color:var(--danger)">*</span></label>
+        <input id="f-container" class="form-input" value="${esc(p.docker_db_container||'')}" placeholder="myapp-db-1">
+        <div class="form-hint">docker compose 服務名稱，例：myapp-postgres-1</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">資料庫名稱 <span style="color:var(--danger)">*</span></label>
+          <input id="f-dbname-d" class="form-input" value="${esc(p.db_name||'')}" placeholder="mydb">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">使用者名稱</label>
+          <input id="f-dbuser-d" class="form-input" value="${esc(p.db_user||'')}" placeholder="backup_user">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">密碼環境變數名稱</label>
+        <input id="f-dbpass-d" class="form-input" value="${esc(p.db_password_env||'')}" placeholder="MYAPP_DB_PASS">
+        <div class="form-hint">填入 .env 裡存放此資料庫密碼的變數名稱</div>
+      </div>
+    </div>
+    <div id="db-direct-fields" style="display:${dbMode==='direct'?'block':'none'}">
+      <div class="form-row">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">資料庫類型</label>
+          <select id="f-dbtype" class="form-input">
+            <option value="postgres" ${p.db_type==='postgres'?'selected':''}>PostgreSQL</option>
+            <option value="mysql"    ${p.db_type==='mysql'   ?'selected':''}>MySQL / MariaDB</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Port</label>
+          <input id="f-dbport" class="form-input" type="number" value="${esc(p.db_port||5432)}" placeholder="5432">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">主機位址 <span style="color:var(--danger)">*</span></label>
+          <input id="f-dbhost" class="form-input" value="${esc(p.db_host||'')}" placeholder="db-host">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">資料庫名稱 <span style="color:var(--danger)">*</span></label>
+          <input id="f-dbname" class="form-input" value="${esc(p.db_name||'')}" placeholder="mydb">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">使用者名稱</label>
+          <input id="f-dbuser" class="form-input" value="${esc(p.db_user||'')}" placeholder="backup_user">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">密碼環境變數名稱</label>
+          <input id="f-dbpass" class="form-input" value="${esc(p.db_password_env||'')}" placeholder="MY_DB_PASS">
+          <div class="form-hint">填入 .env 中的環境變數名稱</div>
+        </div>
+      </div>
     </div>`;
 }
 
 async function submitProject(id = null) {
+  const split = s => s.split(',').map(x=>x.trim()).filter(Boolean);
+  const dbMode = document.getElementById('f-dbmode').value;
   const body = {
-    name:        document.getElementById('f-name').value.trim(),
-    description: document.getElementById('f-desc').value.trim(),
-    nas_base:    document.getElementById('f-nas').value.trim() || '/mnt/nas/backups',
-    enabled:     true
+    name:                document.getElementById('f-name').value.trim(),
+    description:         document.getElementById('f-desc').value.trim(),
+    nas_base:            document.getElementById('f-nas').value.trim() || '/mnt/nas/backups',
+    project_path:        document.getElementById('f-path').value.trim(),
+    backup_dirs:         split(document.getElementById('f-bdirs').value),
+    enabled:             true,
+    db_type: '', db_host: '', db_port: 0, db_name: '', db_user: '', db_password_env: '', docker_db_container: ''
   };
+  if (dbMode === 'docker') {
+    body.db_type             = document.getElementById('f-dbtype-d').value;
+    body.docker_db_container = document.getElementById('f-container').value.trim();
+    body.db_name             = document.getElementById('f-dbname-d').value.trim();
+    body.db_user             = document.getElementById('f-dbuser-d').value.trim();
+    body.db_password_env     = document.getElementById('f-dbpass-d').value.trim();
+  } else if (dbMode === 'direct') {
+    body.db_type         = document.getElementById('f-dbtype').value;
+    body.db_host         = document.getElementById('f-dbhost').value.trim();
+    body.db_port         = parseInt(document.getElementById('f-dbport').value) || 5432;
+    body.db_name         = document.getElementById('f-dbname').value.trim();
+    body.db_user         = document.getElementById('f-dbuser').value.trim();
+    body.db_password_env = document.getElementById('f-dbpass').value.trim();
+  }
   if (!body.name) { toast('請填寫專案名稱','warning'); return; }
   try {
     if (id) { await apiPut(`/api/projects/${id}`, body); toast('專案已更新','success'); }
@@ -553,6 +665,11 @@ async function renderProjectDetail(id) {
             <span class="badge ${proj.enabled?'badge-on':'badge-off'}">${proj.enabled?'啟用':'停用'}</span>
           </div>
           <p>${esc(proj.description||'')}</p>
+          ${proj.project_path ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:16px;font-size:12px">
+            <span style="color:var(--text2)">📂 路徑：<span class="mono">${esc(proj.project_path)}</span></span>
+            ${proj.backup_dirs&&proj.backup_dirs.length ? `<span style="color:var(--text2)">🗂 備份目錄：<span class="mono">${esc(proj.backup_dirs.join(', '))}</span></span>` : ''}
+            ${proj.docker_db_container ? `<span style="color:var(--text2)">🐳 DB Container：<span class="mono">${esc(proj.docker_db_container)}</span></span>` : proj.db_type ? `<span style="color:var(--text2)">🗄 DB：<span class="mono">${esc(proj.db_type)}@${esc(proj.db_host)}:${proj.db_port} / ${esc(proj.db_name)}</span></span>` : ''}
+          </div>` : ''}
         </div>
         <div class="page-hdr-right">
           <button class="btn btn-sm btn-success" onclick="showTrigger(${id})">▶ 手動觸發備份</button>

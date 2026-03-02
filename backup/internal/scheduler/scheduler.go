@@ -13,16 +13,24 @@ import (
 	"backup-manager/internal/store"
 )
 
+// ScheduleStore 是 scheduler 需要的底層儲存介面。
+// store.Store 和 client.DashboardClient 都實作此介面。
+type ScheduleStore interface {
+	ListEnabledSchedules(ctx context.Context) ([]store.Schedule, error)
+	GetSchedule(ctx context.Context, id int) (*store.Schedule, error)
+	UpdateScheduleRunTime(ctx context.Context, id int, lastRun, nextRun time.Time) error
+}
+
 // DynamicScheduler 動態管理 cron 排程，無需重啟即可更新
 type DynamicScheduler struct {
 	cron   *cron.Cron
-	store  *store.Store
+	store  ScheduleStore
 	runner *backup.Runner
 	jobs   map[int]cron.EntryID // scheduleID → cron EntryID
 	mu     sync.Mutex
 }
 
-func New(s *store.Store, r *backup.Runner) *DynamicScheduler {
+func New(s ScheduleStore, r *backup.Runner) *DynamicScheduler {
 	return &DynamicScheduler{
 		cron:   cron.New(cron.WithLocation(time.Local)),
 		store:  s,

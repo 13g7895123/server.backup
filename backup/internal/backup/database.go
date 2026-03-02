@@ -13,12 +13,13 @@ import (
 
 // DatabaseConfig 對應 backup_targets.config (type=database)
 type DatabaseConfig struct {
-	DBType      string `json:"db_type"` // "postgres" | "mysql"
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	Name        string `json:"name"`
-	User        string `json:"user"`
-	PasswordEnv string `json:"password_env"` // 環境變數名稱
+	DBType        string `json:"db_type"` // "postgres" | "mysql"
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	Name          string `json:"name"`
+	User          string `json:"user"`
+	PasswordEnv   string `json:"password_env"`   // 環境變數名稱
+	ContainerName string `json:"container_name"` // docker container 名稱（設定則優先使用 docker exec）
 }
 
 func ParseDatabaseConfig(raw json.RawMessage) (*DatabaseConfig, error) {
@@ -55,10 +56,13 @@ func BackupDatabase(cfg *DatabaseConfig, destPath string) (checksum string, size
 	mw := io.MultiWriter(outFile, hash)
 	gw, _ := gzip.NewWriterLevel(mw, gzip.BestSpeed)
 
-	switch cfg.DBType {
-	case "postgres":
+	switch {
+	case cfg.ContainerName != "":
+		// 優先透過 docker exec 備份，不需 pg_dump/mysqldump 在 agent 裡
+		err = dumpViaDockerExec(cfg.ContainerName, cfg.DBType, cfg, password, gw)
+	case cfg.DBType == "postgres":
 		err = dumpPostgres(cfg, password, gw)
-	case "mysql":
+	case cfg.DBType == "mysql":
 		err = dumpMySQL(cfg, password, gw)
 	default:
 		err = fmt.Errorf("不支援的資料庫類型: %s", cfg.DBType)

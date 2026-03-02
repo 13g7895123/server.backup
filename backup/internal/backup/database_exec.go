@@ -6,6 +6,51 @@ import (
 	"os/exec"
 )
 
+// dumpViaDockerExec 透過 docker exec 在目標 container 內執行 dump，
+// 不需在本機安裝 pg_dump / mysqldump，適合 host agent 直接備份其他 container。
+func dumpViaDockerExec(containerName, dbType string, cfg *DatabaseConfig, password string, w io.Writer) error {
+	var cmd *exec.Cmd
+	switch dbType {
+	case "postgres":
+		args := []string{
+			"exec",
+			"-e", "PGPASSWORD=" + password,
+			containerName,
+			"pg_dump",
+			"-U", cfg.User,
+			"-d", cfg.Name,
+			"--no-password",
+			"-Fp",
+		}
+		cmd = exec.Command("docker", args...)
+	case "mysql":
+		args := []string{
+			"exec",
+			containerName,
+			"mysqldump",
+			"--user=" + cfg.User,
+			"--password=" + password,
+			"--single-transaction",
+			"--routines",
+			"--triggers",
+			"--no-tablespaces",
+			cfg.Name,
+		}
+		cmd = exec.Command("docker", args...)
+	default:
+		return fmt.Errorf("docker exec dump 不支援的資料庫類型: %s", dbType)
+	}
+
+	cmd.Stdout = w
+	if stderr, err := cmd.StderrPipe(); err == nil {
+		go io.Copy(io.Discard, stderr)
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker exec %s (%s) dump 失敗: %w", containerName, dbType, err)
+	}
+	return nil
+}
+
 // dumpPostgres 透過 pg_dump 匯出並寫入 writer
 func dumpPostgres(cfg *DatabaseConfig, password string, w io.Writer) error {
 	args := []string{

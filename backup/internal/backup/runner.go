@@ -12,9 +12,21 @@ import (
 	"backup-manager/internal/store"
 )
 
+// BackingStore 是 runner 需要的底層儲存介面。
+// store.Store 和 client.DashboardClient 都實作此介面。
+type BackingStore interface {
+	GetProject(ctx context.Context, id int) (*store.Project, error)
+	ListTargets(ctx context.Context, projectID int) ([]store.BackupTarget, error)
+	ListRetention(ctx context.Context, projectID int) ([]store.RetentionPolicy, error)
+	CreateRecord(ctx context.Context, r *store.BackupRecord) (int64, error)
+	UpdateRecord(ctx context.Context, r *store.BackupRecord) error
+	ListRecords(ctx context.Context, f store.ListRecordsFilter) ([]store.BackupRecord, int64, error)
+	DeleteRecord(ctx context.Context, id int64) (string, error)
+}
+
 // Runner 執行備份並寫入紀錄
 type Runner struct {
-	Store    *store.Store
+	Store    BackingStore
 	Notifier *notify.Slack
 }
 
@@ -72,6 +84,39 @@ func (r *Runner) RunTarget(ctx context.Context, proj *store.Project, target *sto
 		if err != nil {
 			backupErr = fmt.Errorf("解析 database config 失敗: %w", err)
 		} else {
+			// 若 target config 未設定連線資訊，自動套用 project-level 設定
+			if cfg.ContainerName == "" && cfg.Host == "" {
+				if proj.DockerDbContainer != "" {
+					cfg.ContainerName = proj.DockerDbContainer
+					if cfg.DBType == "" {
+						cfg.DBType = proj.DbType
+					}
+					if cfg.Name == "" {
+						cfg.Name = proj.DbName
+					}
+					if cfg.User == "" {
+						cfg.User = proj.DbUser
+					}
+					if cfg.PasswordEnv == "" {
+						cfg.PasswordEnv = proj.DbPasswordEnv
+					}
+				} else if proj.DbHost != "" {
+					cfg.Host = proj.DbHost
+					cfg.Port = proj.DbPort
+					if cfg.DBType == "" {
+						cfg.DBType = proj.DbType
+					}
+					if cfg.Name == "" {
+						cfg.Name = proj.DbName
+					}
+					if cfg.User == "" {
+						cfg.User = proj.DbUser
+					}
+					if cfg.PasswordEnv == "" {
+						cfg.PasswordEnv = proj.DbPasswordEnv
+					}
+				}
+			}
 			rec.SubType = cfg.DBType
 			checksum, size, backupErr = BackupDatabase(cfg, destPath)
 		}
@@ -169,7 +214,7 @@ func contains(s []string, v string) bool {
 	return false
 }
 
-func computeRetainedUntil(projectID int, targetType string, s *store.Store, ctx context.Context) *time.Time {
+func computeRetainedUntil(projectID int, targetType string, s BackingStore, ctx context.Context) *time.Time {
 	policies, err := s.ListRetention(ctx, projectID)
 	if err != nil {
 		return nil

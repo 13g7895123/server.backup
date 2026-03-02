@@ -34,14 +34,18 @@ func (s *Store) Close() {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
-	sql, err := os.ReadFile("/app/migrations/001_init.sql")
-	if err != nil {
-		// 嘗試本地路徑（開發環境）
-		sql, err = os.ReadFile("migrations/001_init.sql")
+	for _, name := range []string{"001_init.sql", "002_project_details.sql"} {
+		path := "/app/migrations/" + name
+		sql, err := os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("無法讀取 migration 檔案: %w", err)
+			sql, err = os.ReadFile("migrations/" + name)
+			if err != nil {
+				return fmt.Errorf("無法讀取 migration %s: %w", name, err)
+			}
+		}
+		if _, err = s.pool.Exec(ctx, string(sql)); err != nil {
+			return fmt.Errorf("執行 %s 失敗: %w", name, err)
 		}
 	}
-	_, err = s.pool.Exec(ctx, string(sql))
-	return err
+	return nil
 }

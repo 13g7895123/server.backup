@@ -9,6 +9,7 @@ services:
       POSTGRES_DB: backup_manager
       POSTGRES_USER: backup
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    # postgres 不對外暴露 port：agent 透過 dashboard API 與 DB 溝通
     volumes:
       - pgdata:/var/lib/postgresql/data
     secrets:

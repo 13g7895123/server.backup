@@ -57,6 +57,7 @@ func main() {
 	api.RegisterRecordRoutes(mux, s)
 	api.RegisterTriggerRoute(mux, s, runner)
 	api.RegisterSummaryRoute(mux, s)
+	api.RegisterAgentRoutes(mux, s)
 	mux.HandleFunc("GET /api/capabilities", api.HandleCapabilities)
 
 	// 健康檢查
