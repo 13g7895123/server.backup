@@ -1,0 +1,95 @@
+package main
+
+import (
+	"context"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"backup-manager/internal/api"
+	"backup-manager/internal/backup"
+	"backup-manager/internal/notify"
+	"backup-manager/internal/scheduler"
+	"backup-manager/internal/store"
+)
+
+func main() {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	dbURL := requireEnv("DATABASE_URL")
+
+	s, err := store.New(ctx, dbURL)
+	if err != nil {
+		log.Fatalf("資料庫初始化失敗: %v", err)
+	}
+	defer s.Close()
+
+	notifier := notify.NewSlack()
+
+	runner := &backup.Runner{
+		Store:    s,
+		Notifier: notifier,
+	}
+
+	sched := scheduler.New(s, runner)
+	if err := sched.Start(ctx); err != nil {
+		log.Fatalf("排程器啟動失敗: %v", err)
+	}
+	defer sched.Stop()
+
+	// 同時提供 API（agent 暴露內部 trigger 給 dashboard）
+	addr := getEnvOr("AGENT_ADDR", ":9090")
+	mux := http.NewServeMux()
+
+	api.RegisterProjectRoutes(mux, s)
+	api.RegisterTargetRoutes(mux, s)
+	api.RegisterScheduleRoutes(mux, s, sched)
+	api.RegisterRetentionRoutes(mux, s)
+	api.RegisterRecordRoutes(mux, s)
+	api.RegisterTriggerRoute(mux, s, runner)
+	api.RegisterSummaryRoute(mux, s)
+	mux.HandleFunc("GET /api/capabilities", api.HandleCapabilities)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+	}
+
+	go func() {
+		log.Printf("[agent] 啟動於 %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[agent] HTTP server 錯誤: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("[agent] 收到關閉訊號，正在停止...")
+
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutCancel()
+	srv.Shutdown(shutCtx) //nolint
+}
+
+func requireEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("環境變數 %s 未設定", key)
+	}
+	return v
+}
+
+func getEnvOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

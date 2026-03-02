@@ -1,0 +1,57 @@
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: backup_manager
+      POSTGRES_USER: backup
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    secrets:
+      - pg_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backup -d backup_manager"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backup Dashboard (API + Scheduler + Backup Runner) ──────────────────────
+  # 單一容器同時負責：提供 HTTP API、執行排程備份
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${DASHBOARD_PORT}:8080"
+    volumes:
+      # NAS 掛載（可讀寫）
+      - /mnt/nas:/mnt/nas
+      # Host 系統目錄（唯讀，備份來源）
+      - /etc:/host/etc:ro
+      - /home:/host/home:ro
+      - /var/www:/host/var/www:ro
+      - /var/lib/dpkg:/host/var/lib/dpkg:ro
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "postgres://backup:${PG_PASSWORD}@postgres:5432/backup_manager?sslmode=disable"
+      HOST_PREFIX: /host
+      NAS_BASE: /mnt/nas/backups
+      DASHBOARD_ADDR: :8080
+    secrets:
+      - pg_password
+
+volumes:
+  pgdata:
+
+secrets:
+  pg_password:
+    file: ./secrets/pg_password.txt
