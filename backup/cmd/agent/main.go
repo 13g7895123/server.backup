@@ -20,9 +20,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	dashURL    := requireEnv("DASHBOARD_URL")
+	dashURL := requireEnv("DASHBOARD_URL")
 	agentToken := getEnvOr("AGENT_TOKEN", "")
-	agentAddr  := getEnvOr("AGENT_ADDR", ":9090")
+	agentAddr := getEnvOr("AGENT_ADDR", ":9090")
 
 	c := client.New(dashURL, agentToken)
 
