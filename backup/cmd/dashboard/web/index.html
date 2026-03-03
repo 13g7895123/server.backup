@@ -463,8 +463,16 @@ async function renderProjects() {
 }
 
 function toggleDbMode(mode) {
-  document.getElementById('db-docker-fields').style.display = mode === 'docker' ? 'block' : 'none';
-  document.getElementById('db-direct-fields').style.display = mode === 'direct' ? 'block' : 'none';
+  // 專案表單
+  const dd = document.getElementById('db-docker-fields');
+  const di = document.getElementById('db-direct-fields');
+  if (dd) dd.style.display = mode === 'docker' ? 'block' : 'none';
+  if (di) di.style.display = mode === 'direct' ? 'block' : 'none';
+  // 備份目標表單
+  const th = document.getElementById('f-db-host-fields');
+  const tc = document.getElementById('f-db-container-fields');
+  if (th) th.style.display = mode === 'container' ? 'none' : 'block';
+  if (tc) tc.style.display = mode === 'container' ? 'block' : 'none';
 }
 
 function showCreateProject() {
@@ -806,6 +814,33 @@ function targetConfigFields(type, cfg = {}) {
       <div class="form-hint">檔名或目錄名稱，支援萬用字元</div>
     </div>`;
   if (type === 'database') return `
+    <div class="form-group">
+      <label class="form-label">連線方式</label>
+      <select id="f-db-mode" class="form-input" onchange="toggleDbMode(this.value)">
+        <option value="host" ${!cfg.container_name?'selected':''}>主機直連</option>
+        <option value="container" ${cfg.container_name?'selected':''}>Docker Container</option>
+      </select>
+    </div>
+    <div id="f-db-host-fields" style="${cfg.container_name?'display:none':''}">
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">主機位址 <span style="color:var(--danger)">*</span></label>
+          <input id="f-dbhost" class="form-input" value="${esc(cfg.host||'')}" placeholder="127.0.0.1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Port</label>
+          <input id="f-dbport" class="form-input" type="number" value="${esc(cfg.port||'5432')}" placeholder="5432">
+        </div>
+      </div>
+    </div>
+    <div id="f-db-container-fields" style="${cfg.container_name?'':'display:none'}">
+      <div class="form-group">
+        <label class="form-label">Container 名稱 <span style="color:var(--danger)">*</span></label>
+        <input id="f-dbcontainer" class="form-input" value="${esc(cfg.container_name||'')}" placeholder="my-postgres">
+        <div class="form-hint">docker ps 看到的 container 名稱，不需在 agent 上安裝 pg_dump/mysqldump</div>
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">資料庫類型</label>
@@ -813,16 +848,6 @@ function targetConfigFields(type, cfg = {}) {
           <option value="postgres" ${cfg.db_type==='postgres'?'selected':''}>PostgreSQL</option>
           <option value="mysql"    ${cfg.db_type==='mysql'   ?'selected':''}>MySQL / MariaDB</option>
         </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Port</label>
-        <input id="f-dbport" class="form-input" type="number" value="${esc(cfg.port||'5432')}" placeholder="5432">
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">主機位址 <span style="color:var(--danger)">*</span></label>
-        <input id="f-dbhost" class="form-input" value="${esc(cfg.host||'')}" placeholder="db-host">
       </div>
       <div class="form-group">
         <label class="form-label">資料庫名稱 <span style="color:var(--danger)">*</span></label>
@@ -837,7 +862,7 @@ function targetConfigFields(type, cfg = {}) {
       <div class="form-group">
         <label class="form-label">密碼環境變數</label>
         <input id="f-dbpass" class="form-input" value="${esc(cfg.password_env||'')}" placeholder="MY_DB_PASS">
-        <div class="form-hint">填入 .env 中的環境變數名稱</div>
+        <div class="form-hint">填入 .env 中的環境變數名稱，留空表示無密碼</div>
       </div>
     </div>`;
   if (type === 'system') return `
@@ -861,7 +886,7 @@ function buildTargetConfig(type) {
   const c = id => { const el = document.getElementById(id); return el ? el.checked : false; };
   const split = s => s.split(',').map(x=>x.trim()).filter(Boolean);
   if (type === 'files')    return { source: v('f-source'), compress: 'gzip', exclude: split(v('f-exclude')) };
-  if (type === 'database') return { db_type: v('f-dbtype'), host: v('f-dbhost'), port: parseInt(v('f-dbport'))||5432, name: v('f-dbname'), user: v('f-dbuser'), password_env: v('f-dbpass') };
+  if (type === 'database') return { db_type: v('f-dbtype'), host: v('f-dbhost'), port: parseInt(v('f-dbport'))||5432, name: v('f-dbname'), user: v('f-dbuser'), password_env: v('f-dbpass'), container_name: v('f-dbcontainer') };
   if (type === 'system')   return { include: split(v('f-include')), exclude: split(v('f-sys-exclude')), backup_packages: c('f-pkg'), backup_services: c('f-svc') };
   return {};
 }
@@ -871,7 +896,7 @@ async function submitTarget(projId, tid = null) {
   const label = document.getElementById('f-tlabel').value.trim();
   const config = buildTargetConfig(type);
   if (type === 'files' && !config.source) { toast('請填寫來源目錄','warning'); return; }
-  if (type === 'database' && (!config.host || !config.name)) { toast('請填寫主機與資料庫名稱','warning'); return; }
+  if (type === 'database' && (!config.host && !config.container_name)) { toast('請填寫主機位址或 Container 名稱','warning'); return; }
   const body = { type, label, config, enabled: true };
   try {
     if (tid) { await apiPut(`/api/projects/${projId}/targets/${tid}`, body); toast('已更新','success'); }

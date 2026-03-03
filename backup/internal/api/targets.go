@@ -13,9 +13,24 @@ type targetHandler struct{ store *store.Store }
 func RegisterTargetRoutes(mux *http.ServeMux, s *store.Store) {
 	h := &targetHandler{store: s}
 	mux.HandleFunc("GET /api/projects/{id}/targets", h.list)
+	mux.HandleFunc("GET /api/projects/{id}/targets/{tid}", h.get)
 	mux.HandleFunc("POST /api/projects/{id}/targets", h.create)
 	mux.HandleFunc("PUT /api/projects/{id}/targets/{tid}", h.update)
 	mux.HandleFunc("DELETE /api/projects/{id}/targets/{tid}", h.delete)
+}
+
+func (h *targetHandler) get(w http.ResponseWriter, r *http.Request) {
+	tid, err := strconv.Atoi(r.PathValue("tid"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 target id")
+		return
+	}
+	t, err := h.store.GetTarget(r.Context(), tid)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "找不到備份目標")
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
 }
 
 func (h *targetHandler) list(w http.ResponseWriter, r *http.Request) {
