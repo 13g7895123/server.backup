@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -38,8 +40,14 @@ func (h *triggerHandler) trigger(w http.ResponseWriter, r *http.Request) {
 		req.TargetType = "all"
 	}
 
-	// 非同步執行，立即回應
-	go h.runner.RunProject(r.Context(), req.ProjectID, []string{req.TargetType}, nil, "manual") //nolint
+	// 非同步執行，立即回應（使用 context.Background() 避免 HTTP context 取消後中斷備份）
+	go func() {
+		if err := h.runner.RunProject(context.Background(), req.ProjectID, []string{req.TargetType}, nil, "manual"); err != nil {
+			log.Printf("[trigger] project_id=%d type=%s 備份失敗: %v", req.ProjectID, req.TargetType, err)
+		} else {
+			log.Printf("[trigger] project_id=%d type=%s 備份完成", req.ProjectID, req.TargetType)
+		}
+	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":     "triggered",
