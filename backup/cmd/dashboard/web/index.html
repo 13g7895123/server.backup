@@ -25,41 +25,41 @@ input,select,textarea{font-family:inherit;font-size:16px}
 #app{display:flex;height:100vh;overflow:hidden}
 .sidebar{width:var(--sidebar-w);background:#0f172a;flex-shrink:0;display:flex;flex-direction:column;overflow-y:auto}
 .sidebar-logo{padding:18px 16px 14px;border-bottom:1px solid rgba(255,255,255,.08)}
-.sidebar-logo h1{color:#fff;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.sidebar-logo h1{color:#fff;font-size:17px;font-weight:700;display:flex;align-items:center;gap:8px}
 .sidebar-nav{padding:8px 0;flex:1}
-.nav-section{padding:16px 16px 5px;font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.8px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:9px 16px;color:rgba(255,255,255,.65);cursor:pointer;transition:.15s;border-left:3px solid transparent;font-size:13px}
+.nav-section{padding:16px 16px 5px;font-size:12px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.8px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 16px;color:rgba(255,255,255,.65);cursor:pointer;transition:.15s;border-left:3px solid transparent;font-size:15px}
 .nav-item:hover{background:rgba(255,255,255,.06);color:#e2e8f0}
 .nav-item.active{background:rgba(37,99,235,.2);color:#fff;border-left-color:#3b82f6}
-.nav-item .ni{font-size:15px;width:18px;text-align:center}
+.nav-item .ni{font-size:17px;width:18px;text-align:center}
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:54px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.header-title{font-size:17px;font-weight:700}
+.header-title{font-size:19px;font-weight:700}
 .header-right{display:flex;align-items:center;gap:10px}
 .status-dot{width:8px;height:8px;border-radius:50%;background:var(--success)}
 #content{flex:1;overflow-y:auto;padding:24px}
 /* Cards */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
-.card-title{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
+.card-title{font-size:13px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:22px}
 .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;border-left:3px solid transparent}
 .stat-card.c-blue{border-left-color:var(--primary)}.stat-card.c-green{border-left-color:var(--success)}
 .stat-card.c-red{border-left-color:var(--danger)}.stat-card.c-yellow{border-left-color:var(--warning)}
-.stat-label{font-size:12px;color:var(--text2);font-weight:500;margin-bottom:6px}
-.stat-value{font-size:26px;font-weight:800;color:var(--text);line-height:1.1}
-.stat-sub{font-size:11px;color:var(--text3);margin-top:5px}
+.stat-label{font-size:14px;color:var(--text2);font-weight:500;margin-bottom:6px}
+.stat-value{font-size:28px;font-weight:800;color:var(--text);line-height:1.1}
+.stat-sub{font-size:13px;color:var(--text3);margin-top:5px}
 /* Tables */
 .table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
-table{width:100%;border-collapse:collapse;font-size:13px;background:var(--surface)}
-thead th{padding:10px 14px;text-align:left;font-weight:600;color:var(--text2);background:var(--surface2);border-bottom:1px solid var(--border);white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+table{width:100%;border-collapse:collapse;font-size:15px;background:var(--surface)}
+thead th{padding:10px 14px;text-align:left;font-weight:600;color:var(--text2);background:var(--surface2);border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;text-transform:uppercase;letter-spacing:.4px}
 tbody td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
 tbody tr:last-child td{border-bottom:none}
 tbody tr:hover{background:#fafbfc}
 .td-actions{display:flex;gap:5px;justify-content:flex-end;flex-wrap:nowrap}
 /* Buttons */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--rs);font-weight:500;transition:.15s;white-space:nowrap;font-size:13px}
-.btn-sm{padding:5px 10px;font-size:12px}
-.btn-xs{padding:3px 8px;font-size:11px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--rs);font-weight:500;transition:.15s;white-space:nowrap;font-size:15px}
+.btn-sm{padding:5px 10px;font-size:14px}
+.btn-xs{padding:3px 8px;font-size:13px}
 .btn-primary{background:var(--primary);color:#fff}
 .btn-primary:hover{background:var(--primary-h)}
 .btn-secondary{background:var(--surface);border:1px solid var(--border);color:var(--text)}
@@ -71,7 +71,7 @@ tbody tr:hover{background:#fafbfc}
 .btn-ghost{color:var(--text2);border:1px solid transparent}
 .btn-ghost:hover{background:var(--surface2);color:var(--text)}
 /* Badges */
-.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:99px;font-size:13px;font-weight:600;white-space:nowrap}
 .badge::before{content:'';width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .badge-success{background:var(--success-bg);color:var(--success)}.badge-success::before{background:var(--success)}
 .badge-failed{background:var(--danger-bg);color:var(--danger)}.badge-failed::before{background:var(--danger)}
@@ -84,8 +84,8 @@ tbody tr:hover{background:#fafbfc}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 /* Forms */
 .form-group{margin-bottom:14px}
-.form-label{display:block;font-weight:500;margin-bottom:5px;font-size:13px}
-.form-hint{font-size:11px;color:var(--text3);margin-top:3px}
+.form-label{display:block;font-weight:500;margin-bottom:5px;font-size:15px}
+.form-hint{font-size:13px;color:var(--text3);margin-top:3px}
 .form-input{width:100%;padding:7px 11px;border:1px solid var(--border);border-radius:var(--rs);color:var(--text);background:var(--surface);outline:none;transition:.15s}
 .form-input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
 .form-input[disabled]{background:var(--surface2);color:var(--text3)}
@@ -105,18 +105,18 @@ textarea.form-input{resize:vertical;min-height:72px}
 .modal{background:var(--surface);border-radius:var(--radius);width:100%;max-width:560px;box-shadow:var(--shadow-md);margin:auto}
 .modal-lg{max-width:720px}
 .modal-header{padding:18px 22px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-.modal-header h2{font-size:15px;font-weight:700}
+.modal-header h2{font-size:17px;font-weight:700}
 .modal-close{font-size:18px;color:var(--text3);padding:4px 6px;border-radius:4px;line-height:1}
 .modal-close:hover{background:var(--surface2);color:var(--text)}
 .modal-body{padding:18px 22px;max-height:65vh;overflow-y:auto}
 .modal-footer{padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
 /* Tabs */
 .tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto}
-.tab{padding:10px 16px;font-weight:500;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-size:13px;white-space:nowrap}
+.tab{padding:10px 16px;font-weight:500;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-size:15px;white-space:nowrap}
 .tab:hover{color:var(--text)}.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
 /* Page header */
 .page-hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:10px}
-.page-hdr-left h1{font-size:19px;font-weight:700}.page-hdr-left p{font-size:12px;color:var(--text2);margin-top:3px}
+.page-hdr-left h1{font-size:22px;font-weight:700}.page-hdr-left p{font-size:14px;color:var(--text2);margin-top:3px}
 .page-hdr-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 /* Filter bar */
 .filter-bar{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
@@ -129,13 +129,13 @@ select.form-input{width:auto}
 .empty-icon{font-size:36px;margin-bottom:10px}
 /* Toasts */
 #toasts{position:fixed;bottom:20px;right:20px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{display:flex;align-items:center;gap:8px;padding:11px 16px;border-radius:var(--radius);color:#fff;font-size:13px;box-shadow:var(--shadow-md);animation:tslide .2s ease;pointer-events:all;max-width:340px}
+.toast{display:flex;align-items:center;gap:8px;padding:11px 16px;border-radius:var(--radius);color:#fff;font-size:15px;box-shadow:var(--shadow-md);animation:tslide .2s ease;pointer-events:all;max-width:360px}
 .toast.info{background:#334155}.toast.success{background:var(--success)}.toast.error{background:var(--danger)}.toast.warning{background:var(--warning)}
 @keyframes tslide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
 /* Section gap */
 .sg{margin-bottom:20px}
 .divider{border:none;border-top:1px solid var(--border);margin:16px 0}
-.mono{font-family:'SF Mono',Fira Code,monospace;font-size:12px}
+.mono{font-family:'SF Mono',Fira Code,monospace;font-size:14px}
 .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px;display:block}
 .flex-c{display:flex;align-items:center;gap:8px}
 .ml-a{margin-left:auto}
@@ -144,14 +144,14 @@ select.form-input{width:auto}
 .proj-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;transition:.15s}
 .proj-card:hover{border-color:var(--primary);box-shadow:var(--shadow)}
 .proj-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
-.proj-card h3{font-size:14px;font-weight:700}
-.proj-card p{font-size:12px;color:var(--text2);margin-top:3px}
-.proj-stats{display:flex;gap:16px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text2)}
+.proj-card h3{font-size:16px;font-weight:700}
+.proj-card p{font-size:14px;color:var(--text2);margin-top:3px}
+.proj-stats{display:flex;gap:16px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:14px;color:var(--text2)}
 .proj-stat-item{display:flex;flex-direction:column;gap:2px}
-.proj-stat-item strong{font-size:14px;font-weight:700;color:var(--text)}
+.proj-stat-item strong{font-size:16px;font-weight:700;color:var(--text)}
 /* Capabilities */
 .cap-section{margin-bottom:20px}
-.cap-section h3{font-size:13px;font-weight:700;margin-bottom:10px;color:var(--text)}
+.cap-section h3{font-size:15px;font-weight:700;margin-bottom:10px;color:var(--text)}
 .cap-item{background:var(--surface2);border-radius:var(--rs);padding:11px 14px;margin-bottom:8px}
 .cap-item-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .cap-item h4{font-size:13px;font-weight:600}
@@ -1162,6 +1162,9 @@ async function renderBackups() {
     const pages = Math.ceil(total / backupFilter.limit);
     const curPage = Math.floor(backupFilter.offset / backupFilter.limit) + 1;
 
+    // 快取錯誤訊息供 showRecordError 使用
+    recs.forEach(r => { if (r.error_msg) _recordErrors[r.id] = r.error_msg; });
+
     const projOptions = (projects||[]).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
 
     setContent(`
@@ -1197,8 +1200,11 @@ async function renderBackups() {
             <td>${fmtDur(r.duration_sec)}</td>
             <td><span class="badge badge-off">${esc(r.triggered_by||'—')}</span></td>
             <td style="font-size:13px;white-space:nowrap">${fmtDate(r.created_at)}</td>
-            <td><button class="btn btn-xs btn-danger" onclick="deleteRecord(${r.id})">刪除</button></td>
-          </tr>${r.status==='failed'&&r.error_msg ? `<tr><td colspan="9" style="padding:0 14px 10px;background:var(--danger-bg)"><div style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:4px;border:1px solid var(--danger-border)"><span style="color:var(--danger);font-weight:600;white-space:nowrap">錯誤原因：</span><span style="color:var(--danger);font-size:13px;word-break:break-all">${esc(r.error_msg)}</span></div></td></tr>` : ''}`).join('')}</tbody>
+            <td class="td-actions">
+              ${r.status==='failed'&&r.error_msg ? `<button class="btn btn-xs btn-danger" onclick="showRecordError(${r.id})">檢視原因</button>` : ''}
+              <button class="btn btn-xs btn-secondary" onclick="deleteRecord(${r.id})">刪除</button>
+            </td>
+          </tr>`).join('')}</tbody>
         </table>
       </div>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap">
@@ -1225,6 +1231,41 @@ function clearBackupFilter() {
 function backupPage(page) {
   backupFilter.offset = page * backupFilter.limit;
   renderBackups();
+}
+
+// 儲存失敗紀錄的錯誤訊息，供 showRecordError 使用
+const _recordErrors = {};
+
+function showRecordError(id) {
+  const msg = _recordErrors[id] || '（無錯誤訊息）';
+
+  // 解析指令資訊：若包含 "docker exec" 則拆解顯示
+  let cmdSection = '';
+  const dockerMatch = msg.match(/docker exec\s+([\w_\-\.]+)\s+(\S+)/);
+  if (dockerMatch) {
+    cmdSection = `
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">執行的指令</div>
+        <div style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-family:monospace;font-size:13px;word-break:break-all">
+          docker exec ${esc(dockerMatch[1])} ${esc(dockerMatch[2])} …
+        </div>
+        <div style="margin-top:6px;font-size:12px;color:var(--text3)">Container: <strong style="color:var(--text)">${esc(dockerMatch[1])}</strong> &nbsp;|&nbsp; 工具: <strong style="color:var(--text)">${esc(dockerMatch[2])}</strong></div>
+      </div>`;
+  }
+
+  openModal('備份失敗原因', `
+    ${cmdSection}
+    <div>
+      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">錯誤訊息</div>
+      <div style="background:var(--danger-bg);border:1px solid var(--danger-border);border-radius:6px;padding:12px 14px;color:var(--danger);font-size:13px;word-break:break-all;white-space:pre-wrap;font-family:monospace">${esc(msg)}</div>
+    </div>
+    ${msg.includes('executable file not found') ? `
+    <div style="margin-top:14px;background:var(--warning-bg);border-left:3px solid var(--warning);padding:10px 14px;border-radius:4px;font-size:13px">
+      <strong>💡 可能原因：</strong>Dashboard container 內沒有安裝 docker CLI。<br>
+      使用 Docker Container 備份時，應由 <strong>Host Agent</strong>（backup-agent service）執行，而非 dashboard container 直接執行。<br>
+      請確認 backup-agent 已安裝並正常運行：<code style="background:rgba(0,0,0,.06);padding:2px 5px;border-radius:3px">systemctl status backup-agent</code>
+    </div>` : ''}
+  `, `<button class="btn btn-secondary" onclick="closeModal()">關閉</button>`, true);
 }
 
 async function deleteRecord(id, projId = null) {
