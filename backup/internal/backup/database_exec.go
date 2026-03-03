@@ -12,30 +12,21 @@ func dumpViaDockerExec(containerName, dbType string, cfg *DatabaseConfig, passwo
 	var cmd *exec.Cmd
 	switch dbType {
 	case "postgres":
-		args := []string{
-			"exec",
-			"-e", "PGPASSWORD=" + password,
-			containerName,
-			"pg_dump",
-			"-U", cfg.User,
-			"-d", cfg.Name,
-			"--no-password",
-			"-Fp",
+		args := []string{"exec"}
+		if password != "" {
+			args = append(args, "-e", "PGPASSWORD="+password)
 		}
+		args = append(args, containerName,
+			"pg_dump", "-U", cfg.User, "-d", cfg.Name, "--no-password", "-Fp")
 		cmd = exec.Command("docker", args...)
 	case "mysql":
-		args := []string{
-			"exec",
-			containerName,
-			"mysqldump",
+		args := []string{"exec", containerName, "mysqldump",
 			"--user=" + cfg.User,
-			"--password=" + password,
-			"--single-transaction",
-			"--routines",
-			"--triggers",
-			"--no-tablespaces",
-			cfg.Name,
+			"--single-transaction", "--routines", "--triggers", "--no-tablespaces"}
+		if password != "" {
+			args = append(args, "--password="+password)
 		}
+		args = append(args, cfg.Name)
 		cmd = exec.Command("docker", args...)
 	default:
 		return fmt.Errorf("docker exec dump 不支援的資料庫類型: %s", dbType)
@@ -62,7 +53,11 @@ func dumpPostgres(cfg *DatabaseConfig, password string, w io.Writer) error {
 		"-Fp", // plain SQL format
 	}
 	cmd := exec.Command("pg_dump", args...)
-	cmd.Env = append(cmd.Environ(), "PGPASSWORD="+password)
+	env := cmd.Environ()
+	if password != "" {
+		env = append(env, "PGPASSWORD="+password)
+	}
+	cmd.Env = env
 	cmd.Stdout = w
 
 	if out, err := cmd.StderrPipe(); err == nil {
@@ -81,13 +76,15 @@ func dumpMySQL(cfg *DatabaseConfig, password string, w io.Writer) error {
 		fmt.Sprintf("--host=%s", cfg.Host),
 		fmt.Sprintf("--port=%d", cfg.Port),
 		fmt.Sprintf("--user=%s", cfg.User),
-		fmt.Sprintf("--password=%s", password),
 		"--single-transaction",
 		"--routines",
 		"--triggers",
 		"--no-tablespaces",
-		cfg.Name,
 	}
+	if password != "" {
+		args = append(args, fmt.Sprintf("--password=%s", password))
+	}
+	args = append(args, cfg.Name)
 	cmd := exec.Command("mysqldump", args...)
 	cmd.Stdout = w
 

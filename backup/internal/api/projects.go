@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -67,7 +68,59 @@ func (h *projectHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 依專案設定自動建立備份目標
+	h.autoCreateTargets(r.Context(), result)
 	writeJSON(w, http.StatusCreated, result)
+}
+
+// autoCreateTargets 根據專案的 backup_dirs / DB 設定自動建立 backup_targets
+func (h *projectHandler) autoCreateTargets(ctx context.Context, p *store.Project) {
+	// 1. 每個備份目錄建立一個 files target
+	for _, dir := range p.BackupDirs {
+		if dir == "" {
+			continue
+		}
+		cfgBytes, _ := json.Marshal(map[string]any{
+			"source":   dir,
+			"compress": "gzip",
+			"exclude":  []string{},
+		})
+		h.store.CreateTarget(ctx, &store.BackupTarget{ //nolint
+			ProjectID: p.ID,
+			Type:      "files",
+			Label:     dir,
+			Config:    json.RawMessage(cfgBytes),
+			Enabled:   true,
+		})
+	}
+
+	// 2. 若有 DB 設定，建立一個 database target
+	if p.DockerDbContainer == "" && p.DbHost == "" {
+		return
+	}
+	dbCfg := map[string]any{
+		"db_type":      p.DbType,
+		"name":         p.DbName,
+		"user":         p.DbUser,
+		"password_env": p.DbPasswordEnv,
+	}
+	label := "DB"
+	if p.DockerDbContainer != "" {
+		dbCfg["container_name"] = p.DockerDbContainer
+		label = "DB (" + p.DockerDbContainer + ")"
+	} else {
+		dbCfg["host"] = p.DbHost
+		dbCfg["port"] = p.DbPort
+		label = "DB (" + p.DbHost + ")"
+	}
+	cfgBytes, _ := json.Marshal(dbCfg)
+	h.store.CreateTarget(ctx, &store.BackupTarget{ //nolint
+		ProjectID: p.ID,
+		Type:      "database",
+		Label:     label,
+		Config:    json.RawMessage(cfgBytes),
+		Enabled:   true,
+	})
 }
 
 func (h *projectHandler) update(w http.ResponseWriter, r *http.Request) {
