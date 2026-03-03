@@ -860,10 +860,15 @@ function targetConfigFields(type, cfg = {}) {
         <input id="f-dbuser" class="form-input" value="${esc(cfg.user||'')}" placeholder="backup_user">
       </div>
       <div class="form-group">
-        <label class="form-label">密碼環境變數</label>
-        <input id="f-dbpass" class="form-input" value="${esc(cfg.password_env||'')}" placeholder="MY_DB_PASS">
-        <div class="form-hint">填入 .env 中的環境變數名稱，留空表示無密碼</div>
+        <label class="form-label">密碼</label>
+        <input id="f-dbpassword" class="form-input" type="password" value="${esc(cfg.password||'')}" placeholder="（直接輸入密碼）">
+        <div class="form-hint">直接填密碼（優先），或留空改用下方環境變數</div>
       </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">密碼環境變數（備用）</label>
+      <input id="f-dbpass" class="form-input" value="${esc(cfg.password_env||'')}" placeholder="MY_DB_PASS">
+      <div class="form-hint">填入 agent .env 中存放密碼的變數名稱；密碼欄已填時忽略此項</div>
     </div>`;
   if (type === 'system') return `
     <div class="form-group">
@@ -886,7 +891,7 @@ function buildTargetConfig(type) {
   const c = id => { const el = document.getElementById(id); return el ? el.checked : false; };
   const split = s => s.split(',').map(x=>x.trim()).filter(Boolean);
   if (type === 'files')    return { source: v('f-source'), compress: 'gzip', exclude: split(v('f-exclude')) };
-  if (type === 'database') return { db_type: v('f-dbtype'), host: v('f-dbhost'), port: parseInt(v('f-dbport'))||5432, name: v('f-dbname'), user: v('f-dbuser'), password_env: v('f-dbpass'), container_name: v('f-dbcontainer') };
+  if (type === 'database') return { db_type: v('f-dbtype'), host: v('f-dbhost'), port: parseInt(v('f-dbport'))||5432, name: v('f-dbname'), user: v('f-dbuser'), password: v('f-dbpassword'), password_env: v('f-dbpass'), container_name: v('f-dbcontainer') };
   if (type === 'system')   return { include: split(v('f-include')), exclude: split(v('f-sys-exclude')), backup_packages: c('f-pkg'), backup_services: c('f-svc') };
   return {};
 }

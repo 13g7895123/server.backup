@@ -18,7 +18,8 @@ type DatabaseConfig struct {
 	Port          int    `json:"port"`
 	Name          string `json:"name"`
 	User          string `json:"user"`
-	PasswordEnv   string `json:"password_env"`   // 環境變數名稱
+	Password      string `json:"password"`       // 直接填入密碼（優先）
+	PasswordEnv   string `json:"password_env"`   // 環境變數名稱（次要，向下相容）
 	ContainerName string `json:"container_name"` // docker container 名稱（設定則優先使用 docker exec）
 }
 
@@ -44,7 +45,11 @@ func BackupDatabase(cfg *DatabaseConfig, destPath string) (checksum string, size
 		return "", 0, fmt.Errorf("建立目標目錄失敗: %w", err)
 	}
 
-	password := os.Getenv(cfg.PasswordEnv)
+	// 密碼優先順序：直接填入 > 環境變數
+	password := cfg.Password
+	if password == "" && cfg.PasswordEnv != "" {
+		password = os.Getenv(cfg.PasswordEnv)
+	}
 
 	outFile, err := os.Create(destPath)
 	if err != nil {
