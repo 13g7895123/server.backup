@@ -181,6 +181,7 @@ select.form-input{width:auto}
       <div class="nav-section">系統備份</div>
       <div class="nav-item" data-p="syslogs"><span class="ni">📋</span>系統日誌備份</div>
       <div class="nav-item" data-p="gcpbackup"><span class="ni">☁️</span>GCP 備份</div>
+      <div class="nav-item" data-p="integrated"><span class="ni">🔄</span>整合備份</div>
       <div class="nav-section">系統</div>
       <div class="nav-item" data-p="capabilities"><span class="ni">⚙️</span>系統功能</div>
     </nav>
@@ -1508,7 +1509,7 @@ async function renderSyslogs() {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>名稱</th><th>類型</th><th>來源日誌路徑</th><th>目的地</th><th>壓縮</th><th>狀態</th><th style="text-align:right">操作</th>
+            <th>名稱</th><th>類型</th><th>來源日誌路徑</th><th>目的地</th><th>壓縮</th><th>狀態</th><th>最後執行</th><th style="text-align:right">操作</th>
           </tr></thead>
           <tbody>${items.map(c => `<tr>
             <td><strong>${esc(c.name)}</strong></td>
@@ -1517,7 +1518,9 @@ async function renderSyslogs() {
             <td><span class="mono" style="font-size:12px">${esc(c.dest)}</span></td>
             <td>${c.compress ? '<span style="color:var(--success)">✓</span>' : '<span style="color:var(--text3)">—</span>'}</td>
             <td><span class="badge ${c.enabled?'badge-on':'badge-off'}">${c.enabled?'啟用':'停用'}</span></td>
+            <td style="font-size:12px">${runStatusBadge(c.run_status)}${c.last_run_at?'<br><span style="color:var(--text3)">'+fmtDate(c.last_run_at)+'</span>':''}</td>
             <td class="td-actions">
+              <button class="btn btn-xs btn-success" onclick="runSyslog(${c.id})" title="${esc(c.run_message||'')}">▶ 執行</button>
               <button class="btn btn-xs btn-secondary" onclick="showEditSyslog(${c.id})">編輯</button>
               <button class="btn btn-xs btn-ghost" onclick="toggleSyslog(${c.id},${!c.enabled})">${c.enabled?'停用':'啟用'}</button>
               <button class="btn btn-xs btn-danger" onclick="deleteSyslog(${c.id},'${esc(c.name)}')">刪除</button>
@@ -1656,8 +1659,10 @@ async function renderGcpBackup() {
             <div><span style="color:var(--text2)">遠端 DB 路徑：</span><span class="mono">${esc(c.remote_db_path)}/$DATE</span></div>
             <div style="grid-column:1/-1"><span style="color:var(--text2)">SSH Key：</span><span class="mono">${esc(c.ssh_key)}</span></div>
           </div>
-          <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-xs btn-success" onclick="runGcp(${c.id})">▶ 執行 rsync</button>
             <button class="btn btn-xs btn-secondary" onclick="previewGcpScript(${c.id})">👁 預覽 Shell 腳本</button>
+            <span style="margin-left:auto;font-size:12px">${runStatusBadge(c.run_status)}${c.last_run_at?' <span style=\'color:var(--text3)\'>'+fmtDate(c.last_run_at)+'</span>':''}</span>
           </div>
         </div>`).join('')}
       </div>`}
@@ -1773,6 +1778,22 @@ async function deleteGcp(id, name) {
   } catch(e) { toast(e.message,'error'); }
 }
 
+async function runSyslog(id) {
+  try {
+    await apiPost(`/api/syslogs/${id}/run`, {});
+    toast('日誌備份已觸發，請稍後重新整理查看結果', 'success');
+    setTimeout(renderSyslogs, 2500);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function runGcp(id) {
+  try {
+    await apiPost(`/api/gcpconfigs/${id}/run`, {});
+    toast('GCP rsync 已觸發，請稍後重新整理查看結果', 'success');
+    setTimeout(renderGcpBackup, 2500);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
 async function previewGcpScript(id) {
   try {
     const items = await apiGet('/api/gcpconfigs');
@@ -1810,6 +1831,220 @@ async function copyGcpScript(id) {
     await navigator.clipboard.writeText(script);
     toast('腳本已複製到剪貼簿','success');
   } catch(e) { toast('複製失敗：'+e.message,'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   輔助函式：run_status badge
+═══════════════════════════════════════════════════════════════ */
+function runStatusBadge(status) {
+  if (!status) return '';
+  const map = {
+    running: '<span style="color:var(--warning);font-size:11px">⏳ 執行中</span>',
+    success: '<span style="color:var(--success);font-size:11px">✓ 成功</span>',
+    failed:  '<span style="color:var(--danger);font-size:11px">✕ 失敗</span>',
+  };
+  return map[status] || `<span style="font-size:11px">${esc(status)}</span>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   整合備份
+═══════════════════════════════════════════════════════════════ */
+let _integratedSelected = [];
+
+async function renderIntegratedBackup() {
+  setTitle('整合備份');
+  loading();
+  try {
+    const items = await apiGet('/api/integrated');
+    _integratedSelected = [];
+
+    const byType = { project: [], syslog: [], gcp: [] };
+    items.forEach(it => { if (byType[it.type]) byType[it.type].push(it); });
+
+    function itemRow(it) {
+      const typeLabel = it.type === 'project' ? '📁 專案' : it.type === 'syslog' ? '📋 日誌' : '☁️ GCP';
+      const runBtn = it.type === 'project'
+        ? `<button class="btn btn-xs btn-success" onclick="runIntProject(${it.id})">▶ 執行</button>`
+        : it.type === 'syslog'
+          ? `<button class="btn btn-xs btn-success" onclick="runSyslogInt(${it.id})">▶ 執行</button>`
+          : `<button class="btn btn-xs btn-success" onclick="runGcpInt(${it.id})">▶ 執行</button>`;
+      return `<tr id="int-row-${it.type}-${it.id}">
+        <td style="width:32px"><input type="checkbox" onchange="intToggleSelect('${it.type}',${it.id},this.checked)"
+          ${_integratedSelected.some(s=>s.type===it.type&&s.id===it.id)?'checked':''}></td>
+        <td><span class="badge badge-system" style="font-size:11px">${typeLabel}</span></td>
+        <td><strong>${esc(it.name)}</strong></td>
+        <td><span class="badge ${it.enabled?'badge-on':'badge-off'}">${it.enabled?'啟用':'停用'}</span></td>
+        <td><span class="mono" style="font-size:12px;color:var(--text2)">${esc(it.cron_expr)||'<span style="color:var(--text3)">未設定</span>'}</span></td>
+        <td style="font-size:12px">${runStatusBadge(it.run_status)}${it.last_run_at?'<br><span style="color:var(--text3)">'+fmtDate(it.last_run_at)+'</span>':''}</td>
+        <td class="td-actions">${runBtn}</td>
+      </tr>`;
+    }
+
+    function section(title, type, list) {
+      if (!list.length) return '';
+      return `<div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:8px">${title}（${list.length} 項，啟用 ${list.filter(x=>x.enabled).length} 項）</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th style="width:32px"><input type="checkbox" id="chk-all-${type}" onchange="intSelectAllType('${type}',this.checked)"></th>
+              <th>類型</th><th>名稱</th><th>狀態</th><th>排程頻率（cron）</th><th>最後執行</th><th style="text-align:right">操作</th>
+            </tr></thead>
+            <tbody>${list.map(itemRow).join('')}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+
+    setContent(`
+      <div class="page-hdr">
+        <div class="page-hdr-left"><h1>整合備份</h1><p>統一管理並執行所有備份項目</p></div>
+        <div class="page-hdr-right" style="gap:8px">
+          <button class="btn btn-primary" onclick="intRunAll()">▶ 執行全部已啟用</button>
+          <button class="btn btn-secondary" onclick="renderIntegratedBackup()">🔄 重新整理</button>
+        </div>
+      </div>
+
+      <div id="int-batch-bar" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+        <span id="int-sel-count" style="font-size:13px;color:var(--text2)">已選 0 項</span>
+        <button class="btn btn-xs btn-primary" onclick="intBatchRun()">▶ 批次執行</button>
+        <button class="btn btn-xs btn-secondary" onclick="showBatchSchedule()">🕐 設定排程頻率</button>
+        <button class="btn btn-xs btn-ghost" style="margin-left:auto" onclick="intClearSelect()">取消選取</button>
+      </div>
+
+      ${section('📁 專案備份', 'project', byType.project)}
+      ${section('📋 系統日誌備份', 'syslog', byType.syslog)}
+      ${section('☁️ GCP 備份', 'gcp', byType.gcp)}
+      ${items.length===0?'<div class="empty"><div class="empty-icon">🔄</div>目前無任何備份項目</div>':''}
+    `);
+    // 初始隱藏 batch bar（已在 HTML 中，但用 display:none 覆蓋）
+    const bar = document.getElementById('int-batch-bar');
+    if (bar) bar.style.display = 'none';
+  } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
+}
+
+function intToggleSelect(type, id, checked) {
+  if (checked) {
+    if (!_integratedSelected.some(s=>s.type===type&&s.id===id))
+      _integratedSelected.push({type, id});
+  } else {
+    _integratedSelected = _integratedSelected.filter(s=>!(s.type===type&&s.id===id));
+  }
+  updateIntBatchBar();
+}
+
+function intSelectAllType(type, checked) {
+  document.querySelectorAll(`#int-row-${type}-*`).forEach(() => {}); // no-op placeholder
+  document.querySelectorAll('[id^="int-row-'+type+'-"]').forEach(row => {
+    const chk = row.querySelector('input[type=checkbox]');
+    if (!chk) return;
+    const id = parseInt(row.id.split('-').pop());
+    chk.checked = checked;
+    if (checked) {
+      if (!_integratedSelected.some(s=>s.type===type&&s.id===id))
+        _integratedSelected.push({type, id});
+    } else {
+      _integratedSelected = _integratedSelected.filter(s=>!(s.type===type&&s.id===id));
+    }
+  });
+  updateIntBatchBar();
+}
+
+function intClearSelect() {
+  _integratedSelected = [];
+  document.querySelectorAll('[id^="int-row-"] input[type=checkbox]').forEach(c => c.checked = false);
+  document.querySelectorAll('[id^="chk-all-"]').forEach(c => c.checked = false);
+  updateIntBatchBar();
+}
+
+function updateIntBatchBar() {
+  const bar = document.getElementById('int-batch-bar');
+  const cnt = document.getElementById('int-sel-count');
+  if (!bar) return;
+  const n = _integratedSelected.length;
+  bar.style.display = n > 0 ? 'flex' : 'none';
+  if (cnt) cnt.textContent = `已選 ${n} 項`;
+}
+
+async function intRunAll() {
+  if (!confirm('確定要執行全部已啟用的備份項目（syslog + GCP）？\n\n注意：專案備份請至「備份紀錄」頁面觸發。')) return;
+  try {
+    await apiPost('/api/integrated/run-all', {});
+    toast('已觸發全部備份，請稍後重新整理查看結果', 'success');
+    setTimeout(renderIntegratedBackup, 3000);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function intBatchRun() {
+  if (!_integratedSelected.length) { toast('請先勾選項目', 'warning'); return; }
+  const nonProject = _integratedSelected.filter(s => s.type !== 'project');
+  if (!nonProject.length) {
+    toast('選取的為專案類型，請前往備份紀錄頁面觸發專案備份', 'info');
+    return;
+  }
+  try {
+    await apiPost('/api/integrated/batch-run', { items: nonProject });
+    toast(`已觸發 ${nonProject.length} 個備份任務`, 'success');
+    setTimeout(renderIntegratedBackup, 3000);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function runIntProject(id) {
+  toast('專案備份請前往「備份紀錄」頁面，點選觸發備份', 'info');
+}
+
+async function runSyslogInt(id) {
+  try {
+    await apiPost(`/api/syslogs/${id}/run`, {});
+    toast('日誌備份已觸發', 'success');
+    setTimeout(renderIntegratedBackup, 2500);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function runGcpInt(id) {
+  try {
+    await apiPost(`/api/gcpconfigs/${id}/run`, {});
+    toast('GCP rsync 已觸發', 'success');
+    setTimeout(renderIntegratedBackup, 2500);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function showBatchSchedule() {
+  if (!_integratedSelected.length) { toast('請先勾選項目', 'warning'); return; }
+  openModal('批次設定排程頻率', `
+    <div style="margin-bottom:14px;color:var(--text2);font-size:13px">
+      將對 <strong>${_integratedSelected.length}</strong> 個項目設定相同的 cron 排程頻率。
+    </div>
+    <div class="form-group">
+      <label class="form-label">Cron 表達式 <span style="color:var(--danger)">*</span></label>
+      <input id="batch-cron" class="form-input" placeholder="例：0 2 * * *" value="">
+      <div class="form-hint" style="margin-top:8px">
+        常用範例：<br>
+        <span class="mono" style="color:var(--primary)">0 2 * * *</span> — 每天凌晨 2 點<br>
+        <span class="mono" style="color:var(--primary)">0 */6 * * *</span> — 每 6 小時<br>
+        <span class="mono" style="color:var(--primary)">0 0 * * 0</span> — 每週日午夜<br>
+        <span class="mono" style="color:var(--primary)">0 0 1 * *</span> — 每月 1 日
+      </div>
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitBatchSchedule()">套用至選取項目</button>
+  `);
+}
+
+async function submitBatchSchedule() {
+  const cron = document.getElementById('batch-cron').value.trim();
+  if (!cron) { toast('請填寫 cron 表達式', 'warning'); return; }
+  try {
+    const res = await apiPost('/api/integrated/batch-schedule', {
+      items: _integratedSelected,
+      cron_expr: cron
+    });
+    toast(`已更新 ${res.updated} 個項目的排程頻率`, 'success');
+    closeModal();
+    intClearSelect();
+    renderIntegratedBackup();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1900,6 +2135,7 @@ function renderPage() {
   else if (currentPage === 'backups')  renderBackups();
   else if (currentPage === 'syslogs')  renderSyslogs();
   else if (currentPage === 'gcpbackup') renderGcpBackup();
+  else if (currentPage === 'integrated') renderIntegratedBackup();
   else if (currentPage === 'capabilities') renderCapabilities();
   else renderDashboard();
 }
