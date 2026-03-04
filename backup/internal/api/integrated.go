@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"time"
 
+	"backup-manager/internal/backup"
 	"backup-manager/internal/store"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -15,7 +17,7 @@ import (
 
 // IntegratedItem 代表整合備份清單中的一個備份項目（project / syslog / gcp）
 type IntegratedItem struct {
-	Type       string     `json:"type"`        // "project" | "syslog" | "gcp"
+	Type       string     `json:"type"` // "project" | "syslog" | "gcp"
 	ID         int        `json:"id"`
 	Name       string     `json:"name"`
 	Enabled    bool       `json:"enabled"`
@@ -29,13 +31,15 @@ type IntegratedItem struct {
 
 type integratedHandler struct {
 	pool    *pgxpool.Pool
+	runner  *backup.Runner
 	syslogH *syslogHandler
 	gcpH    *gcpHandler
 }
 
-func RegisterIntegratedRoutes(mux *http.ServeMux, s *store.Store) {
+func RegisterIntegratedRoutes(mux *http.ServeMux, s *store.Store, runner *backup.Runner) {
 	h := &integratedHandler{
 		pool:    s.Pool(),
+		runner:  runner,
 		syslogH: &syslogHandler{pool: s.Pool()},
 		gcpH:    &gcpHandler{pool: s.Pool()},
 	}
@@ -110,9 +114,26 @@ func (h *integratedHandler) listAll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
-// runAll 觸發所有 enabled 的項目（syslog + gcp；project 使用現有 trigger）
+// runAll 觸發所有 enabled 的項目（projects + syslog + gcp）
 func (h *integratedHandler) runAll(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// 觸發 projects
+	projRows, err := h.pool.Query(ctx, `SELECT id FROM projects WHERE enabled=true`)
+	if err == nil {
+		defer projRows.Close()
+		for projRows.Next() {
+			var projID int
+			if err := projRows.Scan(&projID); err == nil {
+				pid := projID
+				go func() {
+					if err := h.runner.RunProject(context.Background(), pid, []string{"all"}, nil, "manual"); err != nil {
+						log.Printf("[run-all/project] id=%d 失敗: %v", pid, err)
+					}
+				}()
+			}
+		}
+	}
 
 	// 觸發 syslog
 	slRows, err := h.pool.Query(ctx,
@@ -256,8 +277,15 @@ func (h *integratedHandler) batchRun(w http.ResponseWriter, r *http.Request) {
 					`UPDATE gcp_configs SET run_status=$1, run_message=$2, last_run_at=$3, updated_at=NOW() WHERE id=$4`,
 					status, msg, now, cfg.ID)
 			}(c)
+
+		case "project":
+			pid := item.ID
+			go func() {
+				if err := h.runner.RunProject(context.Background(), pid, []string{"all"}, nil, "manual"); err != nil {
+					log.Printf("[batch-run/project] id=%d 失敗: %v", pid, err)
+				}
+			}()
 		}
-		// "project" 類型：使用現有 /api/backups/trigger 端點，前端自行呼叫
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"status":  "triggered",

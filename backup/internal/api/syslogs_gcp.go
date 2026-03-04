@@ -15,25 +15,29 @@ import (
 	"time"
 
 	"backup-manager/internal/store"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ── models ────────────────────────────────────────────────────────────────────
 
 type SyslogConfig struct {
-	ID         int        `json:"id"`
-	Name       string     `json:"name"`
-	LogType    string     `json:"log_type"`
-	LogFiles   []string   `json:"log_files"`
-	Dest       string     `json:"dest"`
-	Compress   bool       `json:"compress"`
-	Enabled    bool       `json:"enabled"`
-	CronExpr   string     `json:"cron_expr"`
-	LastRunAt  *time.Time `json:"last_run_at"`
-	RunStatus  string     `json:"run_status"`
-	RunMessage string     `json:"run_message"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID            int        `json:"id"`
+	Name          string     `json:"name"`
+	LogType       string     `json:"log_type"`
+	SourceType    string     `json:"source_type"`    // "file" | "journal"
+	LogFiles      []string   `json:"log_files"`
+	JournalUnits  []string   `json:"journal_units"`  // systemd units for journalctl
+	JournalFormat string     `json:"journal_format"` // short | json | export
+	Dest          string     `json:"dest"`
+	Compress      bool       `json:"compress"`
+	Enabled       bool       `json:"enabled"`
+	CronExpr      string     `json:"cron_expr"`
+	LastRunAt     *time.Time `json:"last_run_at"`
+	RunStatus     string     `json:"run_status"`
+	RunMessage    string     `json:"run_message"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 type GcpConfig struct {
@@ -86,7 +90,8 @@ func RegisterGcpRoutes(mux *http.ServeMux, s *store.Store) {
 
 func (h *syslogHandler) list(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT id, name, log_type, log_files, dest, compress, enabled,
+		SELECT id, name, log_type, source_type, log_files, journal_units, journal_format,
+		       dest, compress, enabled,
 		       cron_expr, last_run_at, run_status, run_message,
 		       created_at, updated_at
 		FROM syslog_configs ORDER BY id`)
@@ -98,8 +103,9 @@ func (h *syslogHandler) list(w http.ResponseWriter, r *http.Request) {
 	var items []SyslogConfig
 	for rows.Next() {
 		var c SyslogConfig
-		if err := rows.Scan(&c.ID, &c.Name, &c.LogType, &c.LogFiles, &c.Dest,
-			&c.Compress, &c.Enabled, &c.CronExpr, &c.LastRunAt, &c.RunStatus,
+		if err := rows.Scan(&c.ID, &c.Name, &c.LogType, &c.SourceType, &c.LogFiles,
+			&c.JournalUnits, &c.JournalFormat,
+			&c.Dest, &c.Compress, &c.Enabled, &c.CronExpr, &c.LastRunAt, &c.RunStatus,
 			&c.RunMessage, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -125,11 +131,23 @@ func (h *syslogHandler) create(w http.ResponseWriter, r *http.Request) {
 	if c.LogFiles == nil {
 		c.LogFiles = []string{}
 	}
+	if c.JournalUnits == nil {
+		c.JournalUnits = []string{}
+	}
+	if c.SourceType == "" {
+		c.SourceType = "file"
+	}
+	if c.JournalFormat == "" {
+		c.JournalFormat = "short"
+	}
 	err := h.pool.QueryRow(r.Context(), `
-		INSERT INTO syslog_configs (name, log_type, log_files, dest, compress, enabled, cron_expr)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		INSERT INTO syslog_configs
+		  (name, log_type, source_type, log_files, journal_units, journal_format,
+		   dest, compress, enabled, cron_expr)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		RETURNING id, created_at, updated_at`,
-		c.Name, c.LogType, c.LogFiles, c.Dest, c.Compress, c.Enabled, c.CronExpr).
+		c.Name, c.LogType, c.SourceType, c.LogFiles, c.JournalUnits, c.JournalFormat,
+		c.Dest, c.Compress, c.Enabled, c.CronExpr).
 		Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -152,11 +170,23 @@ func (h *syslogHandler) update(w http.ResponseWriter, r *http.Request) {
 	if c.LogFiles == nil {
 		c.LogFiles = []string{}
 	}
+	if c.JournalUnits == nil {
+		c.JournalUnits = []string{}
+	}
+	if c.SourceType == "" {
+		c.SourceType = "file"
+	}
+	if c.JournalFormat == "" {
+		c.JournalFormat = "short"
+	}
 	_, err = h.pool.Exec(r.Context(), `
-		UPDATE syslog_configs SET name=$1, log_type=$2, log_files=$3, dest=$4,
-		  compress=$5, enabled=$6, cron_expr=$7, updated_at=NOW()
-		WHERE id=$8`,
-		c.Name, c.LogType, c.LogFiles, c.Dest, c.Compress, c.Enabled, c.CronExpr, id)
+		UPDATE syslog_configs SET name=$1, log_type=$2, source_type=$3,
+		  log_files=$4, journal_units=$5, journal_format=$6,
+		  dest=$7, compress=$8, enabled=$9, cron_expr=$10, updated_at=NOW()
+		WHERE id=$11`,
+		c.Name, c.LogType, c.SourceType,
+		c.LogFiles, c.JournalUnits, c.JournalFormat,
+		c.Dest, c.Compress, c.Enabled, c.CronExpr, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -232,11 +262,13 @@ func (h *syslogHandler) run(w http.ResponseWriter, r *http.Request) {
 	}
 	var c SyslogConfig
 	err = h.pool.QueryRow(r.Context(), `
-		SELECT id, name, log_type, log_files, dest, compress, enabled,
+		SELECT id, name, log_type, source_type, log_files, journal_units, journal_format,
+		       dest, compress, enabled,
 		       cron_expr, last_run_at, run_status, run_message, created_at, updated_at
 		FROM syslog_configs WHERE id=$1`, id).
-		Scan(&c.ID, &c.Name, &c.LogType, &c.LogFiles, &c.Dest,
-			&c.Compress, &c.Enabled, &c.CronExpr, &c.LastRunAt, &c.RunStatus,
+		Scan(&c.ID, &c.Name, &c.LogType, &c.SourceType, &c.LogFiles,
+			&c.JournalUnits, &c.JournalFormat,
+			&c.Dest, &c.Compress, &c.Enabled, &c.CronExpr, &c.LastRunAt, &c.RunStatus,
 			&c.RunMessage, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "找不到設定")
@@ -268,6 +300,62 @@ func executeSyslogBackup(c SyslogConfig) (string, error) {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", fmt.Errorf("建立目錄 %s 失敗: %w", destDir, err)
 	}
+
+	if c.SourceType == "journal" {
+		return executeJournalBackup(c, destDir, date)
+	}
+	return executeFileBackup(c, destDir, date)
+}
+
+// executeJournalBackup 使用 journalctl 匯出日誌
+func executeJournalBackup(c SyslogConfig, destDir, date string) (string, error) {
+	outFmt := c.JournalFormat
+	if outFmt == "" {
+		outFmt = "short"
+	}
+	ext := ".log"
+	if outFmt == "json" {
+		ext = ".json"
+	} else if outFmt == "export" {
+		ext = ".journal"
+	}
+
+	// 組合 journalctl 參數
+	args := []string{"--no-pager", "-o", outFmt, "--since", date + " 00:00:00", "--until", date + " 23:59:59"}
+	for _, unit := range c.JournalUnits {
+		if unit != "" {
+			args = append(args, "-u", unit)
+		}
+	}
+
+	unitTag := "all"
+	if len(c.JournalUnits) > 0 {
+		unitTag = c.JournalUnits[0]
+	}
+	destFile := filepath.Join(destDir, "journal_"+unitTag+"_"+date+ext)
+
+	cmd := exec.Command("journalctl", args...) //nolint:gosec
+	out, err := os.Create(destFile)            //nolint:gosec
+	if err != nil {
+		return "", fmt.Errorf("建立輸出檔案失敗: %w", err)
+	}
+	defer out.Close()
+	cmd.Stdout = out
+	if cmdErr := cmd.Run(); cmdErr != nil {
+		return "", fmt.Errorf("journalctl 執行失敗: %w", cmdErr)
+	}
+
+	if c.Compress {
+		if err := gzipFileBackup(destFile); err != nil {
+			return "", fmt.Errorf("壓縮 journal 失敗: %w", err)
+		}
+		return fmt.Sprintf("journal 已備份至 %s.gz", destFile), nil
+	}
+	return fmt.Sprintf("journal 已備份至 %s", destFile), nil
+}
+
+// executeFileBackup 複製指定日誌檔案
+func executeFileBackup(c SyslogConfig, destDir, date string) (string, error) {
 	var copied []string
 	for _, logFile := range c.LogFiles {
 		if logFile == "" {

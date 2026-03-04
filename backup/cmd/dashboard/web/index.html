@@ -441,6 +441,7 @@ async function renderProjects() {
         <div class="page-hdr-right">
           <button class="btn btn-secondary" onclick="showNasSettings()">⚙ NAS 預設路徑</button>
           <button class="btn btn-secondary" onclick="showImportProject()">↑ 匯入專案</button>
+          <button class="btn btn-secondary" onclick="exportAllProjects()">↓ 匯出全部</button>
           <button class="btn btn-primary" onclick="showCreateProject()">＋ 新增專案</button>
         </div>
       </div>
@@ -458,6 +459,7 @@ async function renderProjects() {
             <td class="td-actions">
               <button class="btn btn-xs btn-secondary" onclick="navigate('project',${p.id})">詳情</button>
               <button class="btn btn-xs btn-secondary" onclick="showEditProject(${p.id})">編輯</button>
+              <button class="btn btn-xs btn-ghost" onclick="exportProject(${p.id},'${esc(p.name)}')">↓ 匯出</button>
               <button class="btn btn-xs btn-ghost" onclick="toggleProject(${p.id},${!p.enabled})">${p.enabled?'停用':'啟用'}</button>
               <button class="btn btn-xs btn-danger" onclick="deleteProject(${p.id},'${esc(p.name)}')">刪除</button>
             </td>
@@ -845,6 +847,34 @@ async function confirmDeleteProject(id) {
   } catch(e) { toast(e.message,'error'); }
 }
 
+async function exportProject(id, name) {
+  try {
+    const data = await apiGet(`/api/projects/${id}/export`);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `project_${name.replace(/[^a-z0-9\u4e00-\u9fff]/gi,'_')}_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`已匯出專案「${name}」`, 'success');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function exportAllProjects() {
+  try {
+    const data = await apiGet('/api/projects/export-all');
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `all_projects_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('已匯出全部專案', 'success');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    Project Detail
 ═══════════════════════════════════════════════════════════════ */
@@ -1164,7 +1194,6 @@ function scheduleForm(s = {}) {
         <option value="all"      ${types.includes('all')     ?'selected':''}>全部</option>
         <option value="files"    ${types.includes('files')   ?'selected':''}>僅檔案</option>
         <option value="database" ${types.includes('database')?'selected':''}>僅資料庫</option>
-        <option value="system"   ${types.includes('system')  ?'selected':''}>僅系統</option>
       </select>
     </div>`;
 }
@@ -1314,10 +1343,9 @@ function showTrigger(projId) {
     <div class="form-group">
       <label class="form-label">備份類型</label>
       <select id="f-trigger-type" class="form-input">
-        <option value="all">全部（files + database + system）</option>
+        <option value="all">全部（files + database）</option>
         <option value="files">僅檔案備份</option>
         <option value="database">僅資料庫備份</option>
-        <option value="system">僅系統備份</option>
       </select>
     </div>
     <p style="font-size:12px;color:var(--text2)">觸發後備份將在背景執行，可在「備份紀錄」頁面查看進度。</p>
@@ -1379,7 +1407,6 @@ async function renderBackups() {
           <option value="">全部類型</option>
           <option value="files"    ${backupFilter.type==='files'   ?'selected':''}>檔案</option>
           <option value="database" ${backupFilter.type==='database'?'selected':''}>資料庫</option>
-          <option value="system"   ${backupFilter.type==='system'  ?'selected':''}>系統</option>
         </select>
         <select class="form-input" id="f-bstatus" onchange="applyBackupFilter()" style="min-width:120px">
           <option value="">全部狀態</option>
@@ -1533,7 +1560,9 @@ async function renderSyslogs() {
 }
 
 function syslogForm(c = {}) {
-  const files = (c.log_files||[]).join(', ');
+  const files   = (c.log_files||[]).join(', ');
+  const junits  = (c.journal_units||[]).join(', ');
+  const srcType = c.source_type || 'file';
   return `
     <div class="form-group">
       <label class="form-label">名稱 <span style="color:var(--danger)">*</span></label>
@@ -1547,9 +1576,42 @@ function syslogForm(c = {}) {
       </select>
     </div>
     <div class="form-group">
-      <label class="form-label">來源日誌路徑（逗號分隔）</label>
-      <input id="sl-files" class="form-input" value="${esc(files||'/var/log/auth.log')}" placeholder="/var/log/auth.log">
-      <div class="form-hint">可填多個路徑，以逗號分隔</div>
+      <label class="form-label">來源類型</label>
+      <div style="display:flex;gap:20px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="sl-srctype" value="file"
+            ${srcType==='file'?'checked':''} onchange="toggleSyslogSrc()">
+          📄 日誌檔案（/var/log/...）
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="sl-srctype" value="journal"
+            ${srcType==='journal'?'checked':''} onchange="toggleSyslogSrc()">
+          📰 systemd Journal
+        </label>
+      </div>
+    </div>
+    <div id="sl-file-fields" style="display:${srcType==='journal'?'none':'block'}">
+      <div class="form-group">
+        <label class="form-label">來源日誌路徑（逗號分隔）</label>
+        <input id="sl-files" class="form-input" value="${esc(files||'/var/log/auth.log')}" placeholder="/var/log/auth.log">
+        <div class="form-hint">可填多個路徑，以逗號分隔</div>
+      </div>
+    </div>
+    <div id="sl-journal-fields" style="display:${srcType==='journal'?'block':'none'}">
+      <div class="form-group">
+        <label class="form-label">journalctl 篩選單元（逗號分隔，留空=全部）</label>
+        <input id="sl-junits" class="form-input"
+          value="${esc(junits)}" placeholder="ssh.service, nginx.service">
+        <div class="form-hint">例：ssh.service, fail2ban.service（留空則匯出全部 journal）</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">匯出格式</label>
+        <select id="sl-jfmt" class="form-input">
+          <option value="short"  ${(c.journal_format||'short')==='short' ?'selected':''}>short（人類可讀）</option>
+          <option value="json"   ${c.journal_format==='json'  ?'selected':''}>JSON</option>
+          <option value="export" ${c.journal_format==='export'?'selected':''}>export（二進位）</option>
+        </select>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">備份目的地</label>
@@ -1562,6 +1624,12 @@ function syslogForm(c = {}) {
     <div class="form-group">
       <label class="form-check"><input type="checkbox" id="sl-enabled" ${c.enabled!==false?'checked':''}> 啟用此設定</label>
     </div>`;
+}
+
+function toggleSyslogSrc() {
+  const isJournal = document.querySelector('input[name="sl-srctype"]:checked')?.value === 'journal';
+  document.getElementById('sl-file-fields').style.display   = isJournal ? 'none'  : 'block';
+  document.getElementById('sl-journal-fields').style.display = isJournal ? 'block' : 'none';
 }
 
 function showAddSyslog() {
@@ -1585,13 +1653,17 @@ async function showEditSyslog(id) {
 
 async function submitSyslog(id = null) {
   const split = s => s.split(',').map(x=>x.trim()).filter(Boolean);
+  const srcType = document.querySelector('input[name="sl-srctype"]:checked')?.value || 'file';
   const body = {
-    name:      document.getElementById('sl-name').value.trim(),
-    log_type:  document.getElementById('sl-type').value,
-    log_files: split(document.getElementById('sl-files').value),
-    dest:      document.getElementById('sl-dest').value.trim(),
-    compress:  document.getElementById('sl-compress').checked,
-    enabled:   document.getElementById('sl-enabled').checked
+    name:           document.getElementById('sl-name').value.trim(),
+    log_type:       document.getElementById('sl-type').value,
+    source_type:    srcType,
+    log_files:      srcType === 'file'    ? split(document.getElementById('sl-files').value) : [],
+    journal_units:  srcType === 'journal' ? split(document.getElementById('sl-junits').value) : [],
+    journal_format: srcType === 'journal' ? (document.getElementById('sl-jfmt').value || 'short') : 'short',
+    dest:           document.getElementById('sl-dest').value.trim(),
+    compress:       document.getElementById('sl-compress').checked,
+    enabled:        document.getElementById('sl-enabled').checked
   };
   if (!body.name) { toast('請填寫名稱','warning'); return; }
   try {
@@ -1967,7 +2039,7 @@ function updateIntBatchBar() {
 }
 
 async function intRunAll() {
-  if (!confirm('確定要執行全部已啟用的備份項目（syslog + GCP）？\n\n注意：專案備份請至「備份紀錄」頁面觸發。')) return;
+  if (!confirm('確定要執行全部已啟用的備份項目（專案 + syslog + GCP）？')) return;
   try {
     await apiPost('/api/integrated/run-all', {});
     toast('已觸發全部備份，請稍後重新整理查看結果', 'success');
@@ -1977,20 +2049,34 @@ async function intRunAll() {
 
 async function intBatchRun() {
   if (!_integratedSelected.length) { toast('請先勾選項目', 'warning'); return; }
-  const nonProject = _integratedSelected.filter(s => s.type !== 'project');
-  if (!nonProject.length) {
-    toast('選取的為專案類型，請前往備份紀錄頁面觸發專案備份', 'info');
-    return;
+  const projectItems = _integratedSelected.filter(s => s.type === 'project');
+  const otherItems   = _integratedSelected.filter(s => s.type !== 'project');
+  const promises = [];
+  for (const it of projectItems) {
+    promises.push(
+      apiPost('/api/backups/trigger', { project_id: it.id, target_type: 'all' })
+        .catch(e => console.warn('[intBatchRun] project', it.id, e))
+    );
+  }
+  if (otherItems.length) {
+    promises.push(
+      apiPost('/api/integrated/batch-run', { items: otherItems })
+        .catch(e => console.warn('[intBatchRun] batch', e))
+    );
   }
   try {
-    await apiPost('/api/integrated/batch-run', { items: nonProject });
-    toast(`已觸發 ${nonProject.length} 個備份任務`, 'success');
+    await Promise.all(promises);
+    toast(`已觸發 ${_integratedSelected.length} 個備份任務`, 'success');
     setTimeout(renderIntegratedBackup, 3000);
   } catch(e) { toast(e.message, 'error'); }
 }
 
 async function runIntProject(id) {
-  toast('專案備份請前往「備份紀錄」頁面，點選觸發備份', 'info');
+  try {
+    await apiPost('/api/backups/trigger', { project_id: id, target_type: 'all' });
+    toast('專案備份已觸發', 'success');
+    setTimeout(renderIntegratedBackup, 3000);
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 async function runSyslogInt(id) {

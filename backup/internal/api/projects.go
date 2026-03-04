@@ -20,10 +20,12 @@ func RegisterProjectRoutes(mux *http.ServeMux, s *store.Store) {
 
 	mux.HandleFunc("GET /api/projects", h.list)
 	mux.HandleFunc("POST /api/projects", h.create)
+	mux.HandleFunc("GET /api/projects/export-all", h.exportAll)
 	mux.HandleFunc("GET /api/projects/{id}", h.get)
 	mux.HandleFunc("PUT /api/projects/{id}", h.update)
 	mux.HandleFunc("DELETE /api/projects/{id}", h.delete)
 	mux.HandleFunc("PATCH /api/projects/{id}/toggle", h.toggle)
+	mux.HandleFunc("GET /api/projects/{id}/export", h.exportOne)
 }
 
 func (h *projectHandler) list(w http.ResponseWriter, r *http.Request) {
@@ -199,4 +201,76 @@ func (h *projectHandler) toggle(w http.ResponseWriter, r *http.Request) {
 // pathID 從 {id} path value 解析整數
 func pathID(r *http.Request, key string) (int, error) {
 	return strconv.Atoi(r.PathValue(key))
+}
+
+// ── 匯出結構 ──────────────────────────────────────────────────────────────────
+
+type ProjectExport struct {
+	Version  string             `json:"version"`
+	Project  *store.Project     `json:"project"`
+	Targets  []store.BackupTarget  `json:"targets"`
+	Schedules []store.Schedule   `json:"schedules"`
+}
+
+func buildExport(ctx context.Context, s *store.Store, p *store.Project) (*ProjectExport, error) {
+	targets, err := s.ListTargets(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	schedules, err := s.ListSchedules(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	if targets == nil {
+		targets = []store.BackupTarget{}
+	}
+	if schedules == nil {
+		schedules = []store.Schedule{}
+	}
+	return &ProjectExport{
+		Version:   "1",
+		Project:   p,
+		Targets:   targets,
+		Schedules: schedules,
+	}, nil
+}
+
+func (h *projectHandler) exportOne(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 id")
+		return
+	}
+	p, err := h.store.GetProject(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "找不到專案")
+		return
+	}
+	exp, err := buildExport(r.Context(), h.store, p)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, exp)
+}
+
+func (h *projectHandler) exportAll(w http.ResponseWriter, r *http.Request) {
+	projects, err := h.store.ListProjects(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var exports []*ProjectExport
+	for i := range projects {
+		exp, err := buildExport(r.Context(), h.store, &projects[i])
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		exports = append(exports, exp)
+	}
+	if exports == nil {
+		exports = []*ProjectExport{}
+	}
+	writeJSON(w, http.StatusOK, exports)
 }
