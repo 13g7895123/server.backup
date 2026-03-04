@@ -102,6 +102,7 @@ func (h *projectHandler) autoCreateTargets(ctx context.Context, p *store.Project
 		"db_type":      p.DbType,
 		"name":         p.DbName,
 		"user":         p.DbUser,
+		"password":     p.DbPassword,
 		"password_env": p.DbPasswordEnv,
 	}
 	label := "DB"

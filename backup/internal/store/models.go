@@ -21,6 +21,7 @@ type Project struct {
 	DbPort            int       `json:"db_port"`
 	DbName            string    `json:"db_name"`
 	DbUser            string    `json:"db_user"`
+	DbPassword        string    `json:"db_password"`
 	DbPasswordEnv     string    `json:"db_password_env"`
 	DockerDbContainer string    `json:"docker_db_container"`
 	CreatedAt         time.Time `json:"created_at"`
@@ -92,7 +93,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, description, enabled, nas_base,
 		       project_path, backup_dirs, db_type, db_host, db_port,
-		       db_name, db_user, db_password_env, docker_db_container,
+		       db_name, db_user, db_password, db_password_env, docker_db_container,
 		       created_at, updated_at
 		FROM projects ORDER BY name`)
 	if err != nil {
@@ -105,7 +106,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 		var p Project
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Enabled,
 			&p.NasBase, &p.ProjectPath, &p.BackupDirs, &p.DbType, &p.DbHost,
-			&p.DbPort, &p.DbName, &p.DbUser, &p.DbPasswordEnv,
+			&p.DbPort, &p.DbName, &p.DbUser, &p.DbPassword, &p.DbPasswordEnv,
 			&p.DockerDbContainer, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -119,12 +120,12 @@ func (s *Store) GetProject(ctx context.Context, id int) (*Project, error) {
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, name, description, enabled, nas_base,
 		       project_path, backup_dirs, db_type, db_host, db_port,
-		       db_name, db_user, db_password_env, docker_db_container,
+		       db_name, db_user, db_password, db_password_env, docker_db_container,
 		       created_at, updated_at
 		FROM projects WHERE id = $1`, id).
 		Scan(&p.ID, &p.Name, &p.Description, &p.Enabled, &p.NasBase,
 			&p.ProjectPath, &p.BackupDirs, &p.DbType, &p.DbHost, &p.DbPort,
-			&p.DbName, &p.DbUser, &p.DbPasswordEnv, &p.DockerDbContainer,
+			&p.DbName, &p.DbUser, &p.DbPassword, &p.DbPasswordEnv, &p.DockerDbContainer,
 			&p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -140,12 +141,12 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) (*Project, error)
 		INSERT INTO projects
 		  (name, description, enabled, nas_base,
 		   project_path, backup_dirs, db_type, db_host, db_port,
-		   db_name, db_user, db_password_env, docker_db_container)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		   db_name, db_user, db_password, db_password_env, docker_db_container)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING id, created_at, updated_at`,
 		p.Name, p.Description, p.Enabled, p.NasBase,
 		p.ProjectPath, p.BackupDirs, p.DbType, p.DbHost, p.DbPort,
-		p.DbName, p.DbUser, p.DbPasswordEnv, p.DockerDbContainer).
+		p.DbName, p.DbUser, p.DbPassword, p.DbPasswordEnv, p.DockerDbContainer).
 		Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
@@ -158,12 +159,12 @@ func (s *Store) UpdateProject(ctx context.Context, p *Project) error {
 		UPDATE projects SET
 		  name=$1, description=$2, enabled=$3, nas_base=$4,
 		  project_path=$5, backup_dirs=$6, db_type=$7, db_host=$8, db_port=$9,
-		  db_name=$10, db_user=$11, db_password_env=$12, docker_db_container=$13,
+		  db_name=$10, db_user=$11, db_password=$12, db_password_env=$13, docker_db_container=$14,
 		  updated_at=NOW()
-		WHERE id=$14`,
+		WHERE id=$15`,
 		p.Name, p.Description, p.Enabled, p.NasBase,
 		p.ProjectPath, p.BackupDirs, p.DbType, p.DbHost, p.DbPort,
-		p.DbName, p.DbUser, p.DbPasswordEnv, p.DockerDbContainer, p.ID)
+		p.DbName, p.DbUser, p.DbPassword, p.DbPasswordEnv, p.DockerDbContainer, p.ID)
 	return err
 }
 

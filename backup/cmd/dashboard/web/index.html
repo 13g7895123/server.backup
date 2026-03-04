@@ -435,6 +435,8 @@ async function renderProjects() {
       <div class="page-hdr">
         <div class="page-hdr-left"><h1>專案管理</h1><p>新增、設定或刪除備份專案</p></div>
         <div class="page-hdr-right">
+          <button class="btn btn-secondary" onclick="showNasSettings()">⚙ NAS 預設路徑</button>
+          <button class="btn btn-secondary" onclick="showImportProject()">↑ 匯入專案</button>
           <button class="btn btn-primary" onclick="showCreateProject()">＋ 新增專案</button>
         </div>
       </div>
@@ -515,7 +517,7 @@ function projectForm(p = {}) {
     </div>
     <div class="form-group">
       <label class="form-label">NAS 備份根目錄</label>
-      <input id="f-nas" class="form-input" value="${esc(p.nas_base||'/mnt/nas/backups')}" placeholder="/mnt/nas/backups">
+      <input id="f-nas" class="form-input" value="${esc(p.nas_base || (()=>{ const d=nasDefaultsGet(); return d.nasEnabled?d.nasPath:''; })() || '/mnt/nas/backups')}" placeholder="/mnt/nas/backups">
     </div>
     <hr class="divider">
     <div style="font-weight:600;font-size:13px;margin-bottom:12px">🗄 資料庫設定（選填）</div>
@@ -550,10 +552,17 @@ function projectForm(p = {}) {
           <input id="f-dbuser-d" class="form-input" value="${esc(p.db_user||'')}" placeholder="backup_user">
         </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">密碼環境變數名稱</label>
-        <input id="f-dbpass-d" class="form-input" value="${esc(p.db_password_env||'')}" placeholder="MYAPP_DB_PASS">
-        <div class="form-hint">填入 .env 裡存放此資料庫密碼的變數名稱</div>
+      <div class="form-row">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">密碼（直接輸入）</label>
+          <input id="f-dbpassword-d" class="form-input" type="password" value="${esc(p.db_password||'')}" placeholder="（選填）">
+          <div class="form-hint">直接填密碼（優先），或留空改用環境變數</div>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">密碼環境變數名稱（備用）</label>
+          <input id="f-dbpass-d" class="form-input" value="${esc(p.db_password_env||'')}" placeholder="MYAPP_DB_PASS">
+          <div class="form-hint">填入 .env 裡存放此資料庫密碼的變數名稱</div>
+        </div>
       </div>
     </div>
     <div id="db-direct-fields" style="display:${dbMode==='direct'?'block':'none'}">
@@ -604,13 +613,14 @@ async function submitProject(id = null) {
     project_path:        document.getElementById('f-path').value.trim(),
     backup_dirs:         split(document.getElementById('f-bdirs').value),
     enabled:             true,
-    db_type: '', db_host: '', db_port: 0, db_name: '', db_user: '', db_password_env: '', docker_db_container: ''
+    db_type: '', db_host: '', db_port: 0, db_name: '', db_user: '', db_password: '', db_password_env: '', docker_db_container: ''
   };
   if (dbMode === 'docker') {
     body.db_type             = document.getElementById('f-dbtype-d').value;
     body.docker_db_container = document.getElementById('f-container').value.trim();
     body.db_name             = document.getElementById('f-dbname-d').value.trim();
     body.db_user             = document.getElementById('f-dbuser-d').value.trim();
+    body.db_password         = document.getElementById('f-dbpassword-d').value;
     body.db_password_env     = document.getElementById('f-dbpass-d').value.trim();
   } else if (dbMode === 'direct') {
     body.db_type         = document.getElementById('f-dbtype').value;
@@ -627,6 +637,181 @@ async function submitProject(id = null) {
     closeModal();
     renderProjects();
   } catch(e) { toast(e.message,'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   NAS 預設路徑設定
+═══════════════════════════════════════════════════════════════ */
+function nasDefaultsGet() {
+  try { return JSON.parse(localStorage.getItem('nas_defaults') || '{}'); } catch { return {}; }
+}
+function nasDefaultsSet(v) { localStorage.setItem('nas_defaults', JSON.stringify(v)); }
+
+function showNasSettings() {
+  const cfg = nasDefaultsGet();
+  openModal('NAS 預設路徑設定', `
+    <div class="form-group">
+      <label class="form-check" style="margin-bottom:12px">
+        <input type="checkbox" id="nas-enabled" ${cfg.nasEnabled ? 'checked' : ''}> 啟用預設路徑（新增專案時自動帶入）
+      </label>
+    </div>
+    <div class="form-group">
+      <label class="form-label">NAS 預設備份根目錄</label>
+      <input id="nas-path" class="form-input" value="${esc(cfg.nasPath || '/mnt/nas/backups')}" placeholder="/mnt/nas/backups">
+      <div class="form-hint">啟用後，新增專案時會自動填入此路徑</div>
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="saveNasSettings()">儲存</button>
+  `);
+}
+
+function saveNasSettings() {
+  const enabled = document.getElementById('nas-enabled').checked;
+  const path    = document.getElementById('nas-path').value.trim() || '/mnt/nas/backups';
+  nasDefaultsSet({ nasEnabled: enabled, nasPath: path });
+  toast('NAS 預設路徑已儲存', 'success');
+  closeModal();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   匯入專案（單筆 / 批次）
+═══════════════════════════════════════════════════════════════ */
+const _projectTemplate = {
+  name: "project-name",
+  description: "專案說明",
+  project_path: "/var/www/myapp",
+  backup_dirs: ["uploads", "storage"],
+  nas_base: "/mnt/nas/backups",
+  enabled: true,
+  db_type: "postgres",
+  db_host: "",
+  db_port: 5432,
+  db_name: "",
+  db_user: "",
+  db_password: "",
+  db_password_env: "",
+  docker_db_container: ""
+};
+
+function showImportProject() {
+  openModal('匯入專案', `
+    <p style="font-size:14px;color:var(--text2);margin-bottom:16px">
+      下載範本後，填入專案資料，再選取檔案匯入。支援單筆（<code>{...}</code>）或批次（<code>[{...}, {...}]</code>）JSON 格式。
+    </p>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-sm" onclick="downloadTemplate('single')">⬇ 下載單筆範本</button>
+      <button class="btn btn-secondary btn-sm" onclick="downloadTemplate('batch')">⬇ 下載批次範本（3筆）</button>
+    </div>
+    <hr class="divider">
+    <div class="form-group" style="margin-top:12px">
+      <label class="form-label">選取 JSON 檔案</label>
+      <input id="import-file" type="file" accept=".json" class="form-input" style="padding:5px">
+      <div class="form-hint">選擇已填妥資料的 JSON 範本檔案</div>
+    </div>
+    <div id="import-preview" style="margin-top:10px"></div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="importProjectFromFile()">↑ 匯入</button>
+  `, true);
+
+  document.getElementById('import-file').addEventListener('change', previewImportFile);
+}
+
+function downloadTemplate(mode) {
+  let data, filename;
+  if (mode === 'batch') {
+    data = [
+      { ..._projectTemplate, name: 'project-a' },
+      { ..._projectTemplate, name: 'project-b', db_type: 'mysql', db_host: '127.0.0.1', db_name: 'mydb' },
+      { ..._projectTemplate, name: 'project-c', docker_db_container: 'my-postgres-1', db_name: 'appdb', db_user: 'appuser' }
+    ];
+    filename = 'projects-batch-template.json';
+  } else {
+    data = _projectTemplate;
+    filename = 'project-template.json';
+  }
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function previewImportFile() {
+  const file = document.getElementById('import-file').files[0];
+  const preview = document.getElementById('import-preview');
+  if (!file) { preview.innerHTML = ''; return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      preview.innerHTML = `
+        <div style="padding:10px 14px;background:var(--success-bg);border:1px solid var(--success-border);border-radius:var(--rs);font-size:13px;color:var(--success)">
+          ✓ 檔案解析成功，共 <strong>${items.length}</strong> 筆專案資料
+          <div style="margin-top:6px;color:var(--text2)">${items.map((p,i) => `<span style="margin-right:8px">${i+1}. ${esc(p.name||'(未命名)')}</span>`).join('')}</div>
+        </div>`;
+    } catch(ex) {
+      preview.innerHTML = `<div style="padding:10px 14px;background:var(--danger-bg);border:1px solid var(--danger-border);border-radius:var(--rs);font-size:13px;color:var(--danger)">✕ JSON 格式錯誤：${esc(ex.message)}</div>`;
+    }
+  };
+  reader.readAsText(file);
+}
+
+async function importProjectFromFile() {
+  const file = document.getElementById('import-file')?.files[0];
+  if (!file) { toast('請先選取 JSON 檔案', 'warning'); return; }
+  let parsed;
+  try {
+    const text = await file.text();
+    parsed = JSON.parse(text);
+  } catch(ex) {
+    toast('JSON 格式錯誤：' + ex.message, 'error'); return;
+  }
+  const items = Array.isArray(parsed) ? parsed : [parsed];
+  if (items.length === 0) { toast('檔案內沒有資料', 'warning'); return; }
+
+  let success = 0, fail = 0, failMsgs = [];
+  for (const proj of items) {
+    const body = {
+      name:                String(proj.name || '').trim(),
+      description:         String(proj.description || '').trim(),
+      nas_base:            String(proj.nas_base || '/mnt/nas/backups').trim(),
+      project_path:        String(proj.project_path || '').trim(),
+      backup_dirs:         Array.isArray(proj.backup_dirs) ? proj.backup_dirs.filter(Boolean) : [],
+      enabled:             proj.enabled !== false,
+      db_type:             String(proj.db_type || ''),
+      db_host:             String(proj.db_host || ''),
+      db_port:             parseInt(proj.db_port) || 0,
+      db_name:             String(proj.db_name || ''),
+      db_user:             String(proj.db_user || ''),
+      db_password:         String(proj.db_password || ''),
+      db_password_env:     String(proj.db_password_env || ''),
+      docker_db_container: String(proj.docker_db_container || '')
+    };
+    if (!body.name) { fail++; failMsgs.push('第 ' + (success+fail) + ' 筆：name 為空'); continue; }
+    try {
+      await apiPost('/api/projects', body);
+      success++;
+    } catch(ex) {
+      fail++;
+      failMsgs.push(`「${body.name}」：${ex.message}`);
+    }
+  }
+
+  closeModal();
+  if (success > 0) toast(`成功匯入 ${success} 個專案` + (fail > 0 ? `，${fail} 筆失敗` : ''), fail > 0 ? 'warning' : 'success');
+  if (failMsgs.length) {
+    openModal('部分匯入失敗', `
+      <p style="margin-bottom:10px;color:var(--danger)">以下 ${failMsgs.length} 筆匯入失敗：</p>
+      <ul style="font-size:13px;color:var(--text2);line-height:1.8;padding-left:18px">
+        ${failMsgs.map(m => `<li>${esc(m)}</li>`).join('')}
+      </ul>
+    `);
+  }
+  renderProjects();
 }
 
 async function toggleProject(id, enabled) {

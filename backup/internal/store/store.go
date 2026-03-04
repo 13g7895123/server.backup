@@ -34,7 +34,7 @@ func (s *Store) Close() {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
-	for _, name := range []string{"001_init.sql", "002_project_details.sql"} {
+	for _, name := range []string{"001_init.sql", "002_project_details.sql", "003_add_db_password.sql"} {
 		path := "/app/migrations/" + name
 		sql, err := os.ReadFile(path)
 		if err != nil {
