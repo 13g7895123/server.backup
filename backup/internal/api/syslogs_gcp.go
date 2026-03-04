@@ -25,7 +25,7 @@ type SyslogConfig struct {
 	ID            int        `json:"id"`
 	Name          string     `json:"name"`
 	LogType       string     `json:"log_type"`
-	SourceType    string     `json:"source_type"`    // "file" | "journal"
+	SourceType    string     `json:"source_type"` // "file" | "journal"
 	LogFiles      []string   `json:"log_files"`
 	JournalUnits  []string   `json:"journal_units"`  // systemd units for journalctl
 	JournalFormat string     `json:"journal_format"` // short | json | export

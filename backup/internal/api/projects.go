@@ -206,10 +206,10 @@ func pathID(r *http.Request, key string) (int, error) {
 // ── 匯出結構 ──────────────────────────────────────────────────────────────────
 
 type ProjectExport struct {
-	Version  string             `json:"version"`
-	Project  *store.Project     `json:"project"`
-	Targets  []store.BackupTarget  `json:"targets"`
-	Schedules []store.Schedule   `json:"schedules"`
+	Version   string               `json:"version"`
+	Project   *store.Project       `json:"project"`
+	Targets   []store.BackupTarget `json:"targets"`
+	Schedules []store.Schedule     `json:"schedules"`
 }
 
 func buildExport(ctx context.Context, s *store.Store, p *store.Project) (*ProjectExport, error) {
