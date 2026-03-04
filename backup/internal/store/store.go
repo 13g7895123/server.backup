@@ -33,8 +33,13 @@ func (s *Store) Close() {
 	s.pool.Close()
 }
 
+// Pool 暴露底層連線池給需要直接執行 SQL 的地方
+func (s *Store) Pool() *pgxpool.Pool {
+	return s.pool
+}
+
 func (s *Store) migrate(ctx context.Context) error {
-	for _, name := range []string{"001_init.sql", "002_project_details.sql", "003_add_db_password.sql"} {
+	for _, name := range []string{"001_init.sql", "002_project_details.sql", "003_add_db_password.sql", "004_syslogs_gcp.sql"} {
 		path := "/app/migrations/" + name
 		sql, err := os.ReadFile(path)
 		if err != nil {

@@ -178,6 +178,9 @@ select.form-input{width:auto}
       <div class="nav-item" data-p="dashboard"><span class="ni">📊</span>總覽</div>
       <div class="nav-item" data-p="projects"><span class="ni">📁</span>專案管理</div>
       <div class="nav-item" data-p="backups"><span class="ni">🗂</span>備份紀錄</div>
+      <div class="nav-section">系統備份</div>
+      <div class="nav-item" data-p="syslogs"><span class="ni">📋</span>系統日誌備份</div>
+      <div class="nav-item" data-p="gcpbackup"><span class="ni">☁️</span>GCP 備份</div>
       <div class="nav-section">系統</div>
       <div class="nav-item" data-p="capabilities"><span class="ni">⚙️</span>系統功能</div>
     </nav>
@@ -980,7 +983,6 @@ function targetForm(type = 'files', t = {}) {
       <select id="f-ttype" class="form-input">
         <option value="files"    ${type==='files'   ?'selected':''}>📄 檔案備份</option>
         <option value="database" ${type==='database'?'selected':''}>🗄 資料庫備份</option>
-        <option value="system"   ${type==='system'  ?'selected':''}>🖥 系統備份</option>
       </select>
     </div>
     <div id="target-config-fields">${targetConfigFields(type, cfg)}</div>
@@ -1488,6 +1490,329 @@ async function deleteRecord(id, projId = null) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   系統日誌備份
+═══════════════════════════════════════════════════════════════ */
+async function renderSyslogs() {
+  setTitle('系統日誌備份');
+  loading();
+  try {
+    const items = await apiGet('/api/syslogs');
+    setContent(`
+      <div class="page-hdr">
+        <div class="page-hdr-left"><h1>系統日誌備份</h1><p>管理 Auth / System 日誌的備份設定與路徑</p></div>
+        <div class="page-hdr-right">
+          <button class="btn btn-primary" onclick="showAddSyslog()">＋ 新增設定</button>
+        </div>
+      </div>
+      ${items.length === 0 ? '<div class="empty"><div class="empty-icon">📋</div>尚無設定</div>' : `
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>名稱</th><th>類型</th><th>來源日誌路徑</th><th>目的地</th><th>壓縮</th><th>狀態</th><th style="text-align:right">操作</th>
+          </tr></thead>
+          <tbody>${items.map(c => `<tr>
+            <td><strong>${esc(c.name)}</strong></td>
+            <td><span class="badge ${c.log_type==='auth'?'badge-files':'badge-system'}">${c.log_type==='auth'?'🔐 Auth':'🖥 System'}</span></td>
+            <td><span class="mono" style="font-size:12px">${esc((c.log_files||[]).join(', '))}</span></td>
+            <td><span class="mono" style="font-size:12px">${esc(c.dest)}</span></td>
+            <td>${c.compress ? '<span style="color:var(--success)">✓</span>' : '<span style="color:var(--text3)">—</span>'}</td>
+            <td><span class="badge ${c.enabled?'badge-on':'badge-off'}">${c.enabled?'啟用':'停用'}</span></td>
+            <td class="td-actions">
+              <button class="btn btn-xs btn-secondary" onclick="showEditSyslog(${c.id})">編輯</button>
+              <button class="btn btn-xs btn-ghost" onclick="toggleSyslog(${c.id},${!c.enabled})">${c.enabled?'停用':'啟用'}</button>
+              <button class="btn btn-xs btn-danger" onclick="deleteSyslog(${c.id},'${esc(c.name)}')">刪除</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`}
+    `);
+  } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
+}
+
+function syslogForm(c = {}) {
+  const files = (c.log_files||[]).join(', ');
+  return `
+    <div class="form-group">
+      <label class="form-label">名稱 <span style="color:var(--danger)">*</span></label>
+      <input id="sl-name" class="form-input" value="${esc(c.name||'')}" placeholder="例：Auth 日誌備份">
+    </div>
+    <div class="form-group">
+      <label class="form-label">日誌類型</label>
+      <select id="sl-type" class="form-input">
+        <option value="auth"   ${(c.log_type||'auth')==='auth'  ?'selected':''}>🔐 Auth 日誌</option>
+        <option value="system" ${c.log_type==='system'?'selected':''}>🖥 System 日誌</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">來源日誌路徑（逗號分隔）</label>
+      <input id="sl-files" class="form-input" value="${esc(files||'/var/log/auth.log')}" placeholder="/var/log/auth.log">
+      <div class="form-hint">可填多個路徑，以逗號分隔</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">備份目的地</label>
+      <input id="sl-dest" class="form-input" value="${esc(c.dest||'/mnt/nas/backup/os/auth')}" placeholder="/mnt/nas/backup/os/auth">
+      <div class="form-hint">NAS 上的備份目錄，腳本會以日期自動建立子目錄</div>
+    </div>
+    <div class="form-group">
+      <label class="form-check"><input type="checkbox" id="sl-compress" ${c.compress?'checked':''}> 啟用 gzip 壓縮</label>
+    </div>
+    <div class="form-group">
+      <label class="form-check"><input type="checkbox" id="sl-enabled" ${c.enabled!==false?'checked':''}> 啟用此設定</label>
+    </div>`;
+}
+
+function showAddSyslog() {
+  openModal('新增日誌備份設定', syslogForm(), `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitSyslog()">建立</button>
+  `);
+}
+
+async function showEditSyslog(id) {
+  try {
+    const items = await apiGet('/api/syslogs');
+    const c = items.find(x => x.id === id);
+    if (!c) { toast('找不到設定','error'); return; }
+    openModal('編輯日誌備份設定', syslogForm(c), `
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitSyslog(${id})">儲存</button>
+    `);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function submitSyslog(id = null) {
+  const split = s => s.split(',').map(x=>x.trim()).filter(Boolean);
+  const body = {
+    name:      document.getElementById('sl-name').value.trim(),
+    log_type:  document.getElementById('sl-type').value,
+    log_files: split(document.getElementById('sl-files').value),
+    dest:      document.getElementById('sl-dest').value.trim(),
+    compress:  document.getElementById('sl-compress').checked,
+    enabled:   document.getElementById('sl-enabled').checked
+  };
+  if (!body.name) { toast('請填寫名稱','warning'); return; }
+  try {
+    if (id) { await apiPut(`/api/syslogs/${id}`, body); toast('已更新','success'); }
+    else { await apiPost('/api/syslogs', body); toast('已建立','success'); }
+    closeModal();
+    renderSyslogs();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function toggleSyslog(id, enabled) {
+  try {
+    await apiPatch(`/api/syslogs/${id}/toggle`, { enabled });
+    toast(enabled?'已啟用':'已停用','success');
+    renderSyslogs();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function deleteSyslog(id, name) {
+  if (!confirm(`確定刪除「${name}」？`)) return;
+  try {
+    await apiDelete(`/api/syslogs/${id}`);
+    toast('已刪除','success');
+    renderSyslogs();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GCP 備份
+═══════════════════════════════════════════════════════════════ */
+async function renderGcpBackup() {
+  setTitle('GCP 備份');
+  loading();
+  try {
+    const items = await apiGet('/api/gcpconfigs');
+    setContent(`
+      <div class="page-hdr">
+        <div class="page-hdr-left"><h1>GCP 備份</h1><p>透過 rsync + SSH 將備份同步至 GCP VPS</p></div>
+        <div class="page-hdr-right">
+          <button class="btn btn-primary" onclick="showAddGcp()">＋ 新增設定</button>
+        </div>
+      </div>
+      ${items.length === 0 ? '<div class="empty"><div class="empty-icon">☁️</div>尚無 GCP 設定</div>' : `
+      <div style="display:flex;flex-direction:column;gap:14px">
+        ${items.map(c => `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+            <div>
+              <div style="font-size:16px;font-weight:700">${esc(c.name)}</div>
+              <div style="font-size:13px;color:var(--text2);margin-top:2px">
+                <span class="mono">${esc(c.remote_user)}@${esc(c.remote_host)}</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="badge ${c.enabled?'badge-on':'badge-off'}">${c.enabled?'啟用':'停用'}</span>
+              <button class="btn btn-xs btn-secondary" onclick="showEditGcp(${c.id})">編輯</button>
+              <button class="btn btn-xs btn-ghost" onclick="toggleGcp(${c.id},${!c.enabled})">${c.enabled?'停用':'啟用'}</button>
+              <button class="btn btn-xs btn-danger" onclick="deleteGcp(${c.id},'${esc(c.name)}')">刪除</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+            <div><span style="color:var(--text2)">本地備份目錄：</span><span class="mono">${esc(c.backup_dir)}/$DATE</span></div>
+            <div><span style="color:var(--text2)">本地 DB 目錄：</span><span class="mono">${esc(c.backup_db_dir)}/$DATE</span></div>
+            <div><span style="color:var(--text2)">遠端備份路徑：</span><span class="mono">${esc(c.remote_path)}/$DATE</span></div>
+            <div><span style="color:var(--text2)">遠端 DB 路徑：</span><span class="mono">${esc(c.remote_db_path)}/$DATE</span></div>
+            <div style="grid-column:1/-1"><span style="color:var(--text2)">SSH Key：</span><span class="mono">${esc(c.ssh_key)}</span></div>
+          </div>
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+            <button class="btn btn-xs btn-secondary" onclick="previewGcpScript(${c.id})">👁 預覽 Shell 腳本</button>
+          </div>
+        </div>`).join('')}
+      </div>`}
+    `);
+  } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
+}
+
+function gcpForm(c = {}) {
+  return `
+    <div class="form-group">
+      <label class="form-label">設定名稱 <span style="color:var(--danger)">*</span></label>
+      <input id="gcp-name" class="form-input" value="${esc(c.name||'')}" placeholder="例：Professional GCP 備份">
+    </div>
+    <hr class="divider">
+    <div style="font-weight:600;font-size:13px;margin-bottom:10px">📁 本地備份路徑</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">本地備份目錄</label>
+        <input id="gcp-bdir" class="form-input" value="${esc(c.backup_dir||'/mnt/nas/backup/project/professional')}" placeholder="/mnt/nas/backup/project/...">
+        <div class="form-hint">$DATE 日期子目錄會自動附加</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">本地 DB 備份目錄</label>
+        <input id="gcp-dbdir" class="form-input" value="${esc(c.backup_db_dir||'/mnt/nas/backup/database/professional')}" placeholder="/mnt/nas/backup/database/...">
+      </div>
+    </div>
+    <hr class="divider">
+    <div style="font-weight:600;font-size:13px;margin-bottom:10px">☁️ GCP 遠端設定</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">遠端使用者</label>
+        <input id="gcp-ruser" class="form-input" value="${esc(c.remote_user||'backupuser')}" placeholder="backupuser">
+      </div>
+      <div class="form-group">
+        <label class="form-label">遠端主機 IP / 域名</label>
+        <input id="gcp-rhost" class="form-input" value="${esc(c.remote_host||'')}" placeholder="104.199.148.199">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">遠端備份路徑</label>
+        <input id="gcp-rpath" class="form-input" value="${esc(c.remote_path||'/home/backupuser/backup/project')}" placeholder="/home/backupuser/backup/project">
+      </div>
+      <div class="form-group">
+        <label class="form-label">遠端 DB 路徑</label>
+        <input id="gcp-rdbpath" class="form-input" value="${esc(c.remote_db_path||'/home/backupuser/backup/database')}" placeholder="/home/backupuser/backup/database">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">SSH 私鑰路徑</label>
+      <input id="gcp-sshkey" class="form-input" value="${esc(c.ssh_key||'/home/chinchungtu/.ssh/id_rsa_backup_gcp')}" placeholder="/home/user/.ssh/id_rsa_backup_gcp">
+    </div>
+    <div class="form-group">
+      <label class="form-check"><input type="checkbox" id="gcp-enabled" ${c.enabled!==false?'checked':''}> 啟用此設定</label>
+    </div>`;
+}
+
+function showAddGcp() {
+  openModal('新增 GCP 備份設定', gcpForm(), `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitGcp()">建立</button>
+  `, true);
+}
+
+async function showEditGcp(id) {
+  try {
+    const items = await apiGet('/api/gcpconfigs');
+    const c = items.find(x => x.id === id);
+    if (!c) { toast('找不到設定','error'); return; }
+    openModal('編輯 GCP 備份設定', gcpForm(c), `
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitGcp(${id})">儲存</button>
+    `, true);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function submitGcp(id = null) {
+  const body = {
+    name:          document.getElementById('gcp-name').value.trim(),
+    backup_dir:    document.getElementById('gcp-bdir').value.trim(),
+    backup_db_dir: document.getElementById('gcp-dbdir').value.trim(),
+    remote_user:   document.getElementById('gcp-ruser').value.trim(),
+    remote_host:   document.getElementById('gcp-rhost').value.trim(),
+    remote_path:   document.getElementById('gcp-rpath').value.trim(),
+    remote_db_path:document.getElementById('gcp-rdbpath').value.trim(),
+    ssh_key:       document.getElementById('gcp-sshkey').value.trim(),
+    enabled:       document.getElementById('gcp-enabled').checked
+  };
+  if (!body.name) { toast('請填寫設定名稱','warning'); return; }
+  if (!body.remote_host) { toast('請填寫遠端主機','warning'); return; }
+  try {
+    if (id) { await apiPut(`/api/gcpconfigs/${id}`, body); toast('已更新','success'); }
+    else { await apiPost('/api/gcpconfigs', body); toast('已建立','success'); }
+    closeModal();
+    renderGcpBackup();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function toggleGcp(id, enabled) {
+  try {
+    await apiPatch(`/api/gcpconfigs/${id}/toggle`, { enabled });
+    toast(enabled?'已啟用':'已停用','success');
+    renderGcpBackup();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function deleteGcp(id, name) {
+  if (!confirm(`確定刪除「${name}」？`)) return;
+  try {
+    await apiDelete(`/api/gcpconfigs/${id}`);
+    toast('已刪除','success');
+    renderGcpBackup();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function previewGcpScript(id) {
+  try {
+    const items = await apiGet('/api/gcpconfigs');
+    const c = items.find(x => x.id === id);
+    if (!c) return;
+    const script = `#!/bin/bash
+
+# === 設定區 ===
+DATE=$(date +%F)
+BACKUP_DIR="${c.backup_dir}/$DATE"
+BACKUP_DB_DIR="${c.backup_db_dir}/$DATE"
+REMOTE_USER="${c.remote_user}"
+REMOTE_HOST="${c.remote_host}"
+REMOTE_PATH="${c.remote_path}/$DATE"
+REMOTE_DB_PATH="${c.remote_db_path}/$DATE"
+SSH_KEY="${c.ssh_key}"
+
+# === 傳送到 GCP VPS ===
+rsync -avz -e "ssh -i $SSH_KEY" "$BACKUP_DIR/" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"
+rsync -avz -e "ssh -i $SSH_KEY" "$BACKUP_DB_DIR/" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DB_PATH"
+`;
+    openModal('Shell 腳本預覽', `
+      <div style="background:#1e293b;color:#e2e8f0;padding:14px;border-radius:6px;font-family:monospace;font-size:12px;white-space:pre;overflow-x:auto">${esc(script)}</div>
+    `, `<button class="btn btn-secondary" onclick="closeModal()">關閉</button>
+    <button class="btn btn-primary" onclick="copyGcpScript(${id})">📋 複製腳本</button>`, true);
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function copyGcpScript(id) {
+  try {
+    const items = await apiGet('/api/gcpconfigs');
+    const c = items.find(x => x.id === id);
+    if (!c) return;
+    const script = `#!/bin/bash\n\nDATE=$(date +%F)\nBACKUP_DIR="${c.backup_dir}/$DATE"\nBACKUP_DB_DIR="${c.backup_db_dir}/$DATE"\nREMOTE_USER="${c.remote_user}"\nREMOTE_HOST="${c.remote_host}"\nREMOTE_PATH="${c.remote_path}/$DATE"\nREMOTE_DB_PATH="${c.remote_db_path}/$DATE"\nSSH_KEY="${c.ssh_key}"\n\nrsync -avz -e "ssh -i $SSH_KEY" "$BACKUP_DIR/" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH"\nrsync -avz -e "ssh -i $SSH_KEY" "$BACKUP_DB_DIR/" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DB_PATH"\n`;
+    await navigator.clipboard.writeText(script);
+    toast('腳本已複製到剪貼簿','success');
+  } catch(e) { toast('複製失敗：'+e.message,'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
    Capabilities
 ═══════════════════════════════════════════════════════════════ */
 async function renderCapabilities() {
@@ -1573,6 +1898,8 @@ function renderPage() {
   else if (currentPage === 'projects') renderProjects();
   else if (currentPage === 'project')  renderProjectDetail(currentProjectId);
   else if (currentPage === 'backups')  renderBackups();
+  else if (currentPage === 'syslogs')  renderSyslogs();
+  else if (currentPage === 'gcpbackup') renderGcpBackup();
   else if (currentPage === 'capabilities') renderCapabilities();
   else renderDashboard();
 }
