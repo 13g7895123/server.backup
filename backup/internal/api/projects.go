@@ -139,7 +139,27 @@ func (h *projectHandler) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 若專案有 DB 設定，且目前尚無任何 database target，則自動補建
+	h.ensureDbTarget(r.Context(), &p)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// ensureDbTarget 確保專案若有 DB 設定，就存在至少一個 database target
+func (h *projectHandler) ensureDbTarget(ctx context.Context, p *store.Project) {
+	if p.DockerDbContainer == "" && p.DbHost == "" {
+		return
+	}
+	targets, err := h.store.ListTargets(ctx, p.ID)
+	if err != nil {
+		return
+	}
+	for _, t := range targets {
+		if t.Type == "database" {
+			return // 已有 database target，不重複建立
+		}
+	}
+	// 無 database target，自動建立
+	h.autoCreateTargets(ctx, p)
 }
 
 func (h *projectHandler) delete(w http.ResponseWriter, r *http.Request) {

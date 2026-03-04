@@ -34,7 +34,7 @@ type Runner struct {
 func (r *Runner) RunTarget(ctx context.Context, proj *store.Project, target *store.BackupTarget, scheduleID *int, triggeredBy string) error {
 	timestamp := time.Now().Format("20060102_150405")
 	date := time.Now().Format("2006-01-02")
-	destDir := filepath.Join(proj.NasBase, "projects", proj.Name, target.Type, date)
+	destDir := filepath.Join(proj.NasBase, target.Type, date)
 
 	filename := fmt.Sprintf("%s_%s_%s.tar.gz", proj.Name, target.Type, timestamp)
 	if target.Type == "database" {
