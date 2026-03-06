@@ -43,8 +43,9 @@ type SyslogConfig struct {
 type GcpConfig struct {
 	ID           int        `json:"id"`
 	Name         string     `json:"name"`
-	BackupDir    string     `json:"backup_dir"`
-	BackupDbDir  string     `json:"backup_db_dir"`
+	ProjectIDs   []int      `json:"project_ids"`   // 關聯專案，用各專案 nas_base 做 rsync 來源
+	BackupDir    string     `json:"backup_dir"`    // fallback：未設定 project_ids 時使用
+	BackupDbDir  string     `json:"backup_db_dir"` // fallback：未設定 project_ids 時使用
 	RemoteUser   string     `json:"remote_user"`
 	RemoteHost   string     `json:"remote_host"`
 	RemotePath   string     `json:"remote_path"`
@@ -418,7 +419,7 @@ func gzipFileBackup(path string) error {
 
 func (h *gcpHandler) list(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT id, name, backup_dir, backup_db_dir, remote_user, remote_host,
+		SELECT id, name, project_ids, backup_dir, backup_db_dir, remote_user, remote_host,
 		       remote_path, remote_db_path, ssh_key, enabled,
 		       cron_expr, last_run_at, run_status, run_message,
 		       created_at, updated_at
@@ -431,12 +432,15 @@ func (h *gcpHandler) list(w http.ResponseWriter, r *http.Request) {
 	var items []GcpConfig
 	for rows.Next() {
 		var c GcpConfig
-		if err := rows.Scan(&c.ID, &c.Name, &c.BackupDir, &c.BackupDbDir,
+		if err := rows.Scan(&c.ID, &c.Name, &c.ProjectIDs, &c.BackupDir, &c.BackupDbDir,
 			&c.RemoteUser, &c.RemoteHost, &c.RemotePath, &c.RemoteDbPath,
 			&c.SshKey, &c.Enabled, &c.CronExpr, &c.LastRunAt, &c.RunStatus,
 			&c.RunMessage, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if c.ProjectIDs == nil {
+			c.ProjectIDs = []int{}
 		}
 		items = append(items, c)
 	}
@@ -456,13 +460,16 @@ func (h *gcpHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name 不可為空")
 		return
 	}
+	if c.ProjectIDs == nil {
+		c.ProjectIDs = []int{}
+	}
 	err := h.pool.QueryRow(r.Context(), `
 		INSERT INTO gcp_configs
-		  (name, backup_dir, backup_db_dir, remote_user, remote_host,
+		  (name, project_ids, backup_dir, backup_db_dir, remote_user, remote_host,
 		   remote_path, remote_db_path, ssh_key, enabled, cron_expr)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		RETURNING id, created_at, updated_at`,
-		c.Name, c.BackupDir, c.BackupDbDir, c.RemoteUser, c.RemoteHost,
+		c.Name, c.ProjectIDs, c.BackupDir, c.BackupDbDir, c.RemoteUser, c.RemoteHost,
 		c.RemotePath, c.RemoteDbPath, c.SshKey, c.Enabled, c.CronExpr).
 		Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
@@ -483,13 +490,16 @@ func (h *gcpHandler) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "無效的 JSON: "+err.Error())
 		return
 	}
+	if c.ProjectIDs == nil {
+		c.ProjectIDs = []int{}
+	}
 	_, err = h.pool.Exec(r.Context(), `
 		UPDATE gcp_configs SET
-		  name=$1, backup_dir=$2, backup_db_dir=$3, remote_user=$4,
-		  remote_host=$5, remote_path=$6, remote_db_path=$7, ssh_key=$8,
-		  enabled=$9, cron_expr=$10, updated_at=NOW()
-		WHERE id=$11`,
-		c.Name, c.BackupDir, c.BackupDbDir, c.RemoteUser,
+		  name=$1, project_ids=$2, backup_dir=$3, backup_db_dir=$4, remote_user=$5,
+		  remote_host=$6, remote_path=$7, remote_db_path=$8, ssh_key=$9,
+		  enabled=$10, cron_expr=$11, updated_at=NOW()
+		WHERE id=$12`,
+		c.Name, c.ProjectIDs, c.BackupDir, c.BackupDbDir, c.RemoteUser,
 		c.RemoteHost, c.RemotePath, c.RemoteDbPath, c.SshKey, c.Enabled, c.CronExpr, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -566,11 +576,11 @@ func (h *gcpHandler) run(w http.ResponseWriter, r *http.Request) {
 	}
 	var c GcpConfig
 	err = h.pool.QueryRow(r.Context(), `
-		SELECT id, name, backup_dir, backup_db_dir, remote_user, remote_host,
+		SELECT id, name, project_ids, backup_dir, backup_db_dir, remote_user, remote_host,
 		       remote_path, remote_db_path, ssh_key, enabled,
 		       cron_expr, last_run_at, run_status, run_message, created_at, updated_at
 		FROM gcp_configs WHERE id=$1`, id).
-		Scan(&c.ID, &c.Name, &c.BackupDir, &c.BackupDbDir,
+		Scan(&c.ID, &c.Name, &c.ProjectIDs, &c.BackupDir, &c.BackupDbDir,
 			&c.RemoteUser, &c.RemoteHost, &c.RemotePath, &c.RemoteDbPath,
 			&c.SshKey, &c.Enabled, &c.CronExpr, &c.LastRunAt, &c.RunStatus,
 			&c.RunMessage, &c.CreatedAt, &c.UpdatedAt)
@@ -578,11 +588,14 @@ func (h *gcpHandler) run(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "找不到設定")
 		return
 	}
+	if c.ProjectIDs == nil {
+		c.ProjectIDs = []int{}
+	}
 	h.pool.Exec(r.Context(), //nolint
 		`UPDATE gcp_configs SET run_status='running', run_message='', updated_at=NOW() WHERE id=$1`, id)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered", "message": "GCP 備份已開始（rsync）"})
 	go func() {
-		msg, runErr := executeGcpBackup(c)
+		msg, runErr := executeGcpBackup(r.Context(), h.pool, c)
 		status := "success"
 		if runErr != nil {
 			status = "failed"
@@ -598,10 +611,58 @@ func (h *gcpHandler) run(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-func executeGcpBackup(c GcpConfig) (string, error) {
+// gcpProjectInfo 查詢結果
+type gcpProjectInfo struct {
+	ID      int
+	Name    string
+	NasBase string
+}
+
+func executeGcpBackup(ctx context.Context, pool *pgxpool.Pool, c GcpConfig) (string, error) {
 	date := time.Now().Format("2006-01-02")
 	sshOpt := fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=no", c.SshKey)
 
+	// 若有指定 project_ids，對每個專案的 nas_base 做 rsync
+	if len(c.ProjectIDs) > 0 {
+		rows, err := pool.Query(ctx,
+			`SELECT id, name, nas_base FROM projects WHERE id = ANY($1) AND enabled = true ORDER BY id`,
+			c.ProjectIDs)
+		if err != nil {
+			return "", fmt.Errorf("查詢專案失敗: %w", err)
+		}
+		defer rows.Close()
+		var projects []gcpProjectInfo
+		for rows.Next() {
+			var p gcpProjectInfo
+			if err := rows.Scan(&p.ID, &p.Name, &p.NasBase); err != nil {
+				return "", fmt.Errorf("掃描專案失敗: %w", err)
+			}
+			projects = append(projects, p)
+		}
+		if len(projects) == 0 {
+			return "", fmt.Errorf("找不到已啟用的專案（ids: %v）", c.ProjectIDs)
+		}
+		var synced []string
+		for _, p := range projects {
+			if p.NasBase == "" {
+				log.Printf("[gcp-run] 專案 %s (id=%d) nas_base 為空，略過", p.Name, p.ID)
+				continue
+			}
+			srcDir := p.NasBase + "/" + date + "/"
+			// 遠端路徑加上專案名稱子目錄
+			dstDir := fmt.Sprintf("%s@%s:%s/%s/%s", c.RemoteUser, c.RemoteHost, c.RemotePath, p.Name, date)
+			cmd := exec.Command("rsync", "-avz", "-e", sshOpt, srcDir, dstDir) //nolint:gosec
+			out, cmdErr := cmd.CombinedOutput()
+			if cmdErr != nil {
+				return "", fmt.Errorf("rsync 專案 %s 失敗: %w\n%s", p.Name, cmdErr, string(out))
+			}
+			synced = append(synced, p.Name)
+			log.Printf("[gcp-run] 專案 %s rsync 完成: %s → %s", p.Name, srcDir, dstDir)
+		}
+		return fmt.Sprintf("rsync 完成 %d 個專案 (%s) → %s@%s", len(synced), join(synced, ", "), c.RemoteUser, c.RemoteHost), nil
+	}
+
+	// fallback：使用固定的 backup_dir / backup_db_dir
 	srcDir := c.BackupDir + "/" + date + "/"
 	dstDir := fmt.Sprintf("%s@%s:%s/%s", c.RemoteUser, c.RemoteHost, c.RemotePath, date)
 	cmd1 := exec.Command("rsync", "-avz", "-e", sshOpt, srcDir, dstDir) //nolint:gosec
@@ -619,4 +680,15 @@ func executeGcpBackup(c GcpConfig) (string, error) {
 	}
 
 	return fmt.Sprintf("rsync 完成 → %s@%s", c.RemoteUser, c.RemoteHost), nil
+}
+
+func join(ss []string, sep string) string {
+	result := ""
+	for i, s := range ss {
+		if i > 0 {
+			result += sep
+		}
+		result += s
+	}
+	return result
 }

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"backup-manager/internal/api"
 	"backup-manager/internal/backup"
 	"backup-manager/internal/client"
 	"backup-manager/internal/notify"
@@ -86,6 +87,9 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+
+	// GET /ssh-audit  — host 直接查詢 journalctl，不需經過 Docker 容器
+	mux.HandleFunc("GET /ssh-audit", auth(api.HandleSSHAuditDirect))
 
 	srv := &http.Server{
 		Addr:         agentAddr,

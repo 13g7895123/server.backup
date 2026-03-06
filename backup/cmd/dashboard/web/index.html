@@ -182,6 +182,8 @@ select.form-input{width:auto}
       <div class="nav-item" data-p="syslogs"><span class="ni">📋</span>系統日誌備份</div>
       <div class="nav-item" data-p="gcpbackup"><span class="ni">☁️</span>GCP 備份</div>
       <div class="nav-item" data-p="integrated"><span class="ni">🔄</span>整合備份</div>
+      <div class="nav-section">安全稽核</div>
+      <div class="nav-item" data-p="ssh-audit"><span class="ni">🔐</span>SSH 登入稽核</div>
       <div class="nav-section">系統</div>
       <div class="nav-item" data-p="capabilities"><span class="ni">⚙️</span>系統功能</div>
     </nav>
@@ -1698,7 +1700,12 @@ async function renderGcpBackup() {
   setTitle('GCP 備份');
   loading();
   try {
-    const items = await apiGet('/api/gcpconfigs');
+    const [items, projects] = await Promise.all([
+      apiGet('/api/gcpconfigs'),
+      apiGet('/api/projects').catch(() => [])
+    ]);
+    const projMap = {};
+    projects.forEach(p => { projMap[p.id] = p; });
     setContent(`
       <div class="page-hdr">
         <div class="page-hdr-left"><h1>GCP 備份</h1><p>透過 rsync + SSH 將備份同步至 GCP VPS</p></div>
@@ -1708,7 +1715,15 @@ async function renderGcpBackup() {
       </div>
       ${items.length === 0 ? '<div class="empty"><div class="empty-icon">☁️</div>尚無 GCP 設定</div>' : `
       <div style="display:flex;flex-direction:column;gap:14px">
-        ${items.map(c => `
+        ${items.map(c => {
+          const projIds = c.project_ids || [];
+          const srcInfo = projIds.length > 0
+            ? projIds.map(id => {
+                const p = projMap[id];
+                return p ? `<span class="badge badge-info">${esc(p.name)}</span> <span class="mono" style="font-size:11px">${esc(p.nas_base||'')}/$DATE</span>` : `<span class="badge">id:${id}</span>`;
+              }).join('<br>')
+            : `<span class="mono">${esc(c.backup_dir)}/$DATE</span> <span style="color:var(--text3)">(fallback)</span>`;
+          return `
         <div class="card">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
             <div>
@@ -1725,8 +1740,7 @@ async function renderGcpBackup() {
             </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
-            <div><span style="color:var(--text2)">本地備份目錄：</span><span class="mono">${esc(c.backup_dir)}/$DATE</span></div>
-            <div><span style="color:var(--text2)">本地 DB 目錄：</span><span class="mono">${esc(c.backup_db_dir)}/$DATE</span></div>
+            <div style="grid-column:1/-1"><span style="color:var(--text2)">來源專案：</span>${srcInfo}</div>
             <div><span style="color:var(--text2)">遠端備份路徑：</span><span class="mono">${esc(c.remote_path)}/$DATE</span></div>
             <div><span style="color:var(--text2)">遠端 DB 路徑：</span><span class="mono">${esc(c.remote_db_path)}/$DATE</span></div>
             <div style="grid-column:1/-1"><span style="color:var(--text2)">SSH Key：</span><span class="mono">${esc(c.ssh_key)}</span></div>
@@ -1736,31 +1750,57 @@ async function renderGcpBackup() {
             <button class="btn btn-xs btn-secondary" onclick="previewGcpScript(${c.id})">👁 預覽 Shell 腳本</button>
             <span style="margin-left:auto;font-size:12px">${runStatusBadge(c.run_status)}${c.last_run_at?' <span style=\'color:var(--text3)\'>'+fmtDate(c.last_run_at)+'</span>':''}</span>
           </div>
-        </div>`).join('')}
+        </div>`;
+        }).join('')}
       </div>`}
     `);
   } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
 }
 
-function gcpForm(c = {}) {
+function gcpForm(c = {}, projects = []) {
+  const selIds = new Set(c.project_ids || []);
+  const projOptions = projects.map(p => `
+    <label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer">
+      <input type="checkbox" class="gcp-proj-chk" value="${p.id}" ${selIds.has(p.id)?'checked':''}>
+      <span>${esc(p.name)}</span>
+      <span style="color:var(--text3);font-size:12px;margin-left:auto">${esc(p.nas_base||'')}</span>
+    </label>`).join('');
   return `
     <div class="form-group">
       <label class="form-label">設定名稱 <span style="color:var(--danger)">*</span></label>
       <input id="gcp-name" class="form-input" value="${esc(c.name||'')}" placeholder="例：Professional GCP 備份">
     </div>
     <hr class="divider">
-    <div style="font-weight:600;font-size:13px;margin-bottom:10px">📁 本地備份路徑</div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">本地備份目錄</label>
-        <input id="gcp-bdir" class="form-input" value="${esc(c.backup_dir||'/mnt/nas/backup/project/professional')}" placeholder="/mnt/nas/backup/project/...">
-        <div class="form-hint">$DATE 日期子目錄會自動附加</div>
+    <div style="font-weight:600;font-size:13px;margin-bottom:10px">📁 來源專案（nas_base）</div>
+    <div class="form-group">
+      <div style="border:1px solid var(--border);border-radius:6px;padding:8px 12px;max-height:160px;overflow-y:auto;background:var(--bg2)">
+        ${projOptions || '<span style="color:var(--text3);font-size:13px">尚無已啟用的專案</span>'}
       </div>
-      <div class="form-group">
-        <label class="form-label">本地 DB 備份目錄</label>
-        <input id="gcp-dbdir" class="form-input" value="${esc(c.backup_db_dir||'/mnt/nas/backup/database/professional')}" placeholder="/mnt/nas/backup/database/...">
-      </div>
+      <div class="form-hint">勾選後，rsync 來源為各專案的 nas_base/$DATE/，目的端路徑會加上專案名稱子目錄</div>
     </div>
+    <details style="margin-bottom:12px">
+      <summary style="cursor:pointer;font-size:13px;color:var(--text2)">🗂 Fallback 固定路徑（未選取專案時使用）</summary>
+      <div style="margin-top:10px">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">本地備份目錄</label>
+            <input id="gcp-bdir" class="form-input" value="${esc(c.backup_dir||'/mnt/nas/backup/project/professional')}" placeholder="/mnt/nas/backup/project/...">
+            <div class="form-hint">$DATE 日期子目錄會自動附加</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">本地 DB 備份目錄</label>
+            <input id="gcp-dbdir" class="form-input" value="${esc(c.backup_db_dir||'/mnt/nas/backup/database/professional')}" placeholder="/mnt/nas/backup/database/...">
+          </div>
+        </div>
+      </div>
+    </details>
+      <div class="form-group">
+            <label class="form-label">本地 DB 備份目錄</label>
+            <input id="gcp-dbdir" class="form-input" value="${esc(c.backup_db_dir||'/mnt/nas/backup/database/professional')}" placeholder="/mnt/nas/backup/database/...">
+          </div>
+        </div>
+      </div>
+    </details>
     <hr class="divider">
     <div style="font-weight:600;font-size:13px;margin-bottom:10px">☁️ GCP 遠端設定</div>
     <div class="form-row">
@@ -1793,18 +1833,28 @@ function gcpForm(c = {}) {
 }
 
 function showAddGcp() {
-  openModal('新增 GCP 備份設定', gcpForm(), `
-    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
-    <button class="btn btn-primary" onclick="submitGcp()">建立</button>
-  `, true);
+  apiGet('/api/projects').then(projects => {
+    openModal('新增 GCP 備份設定', gcpForm({}, projects.filter(p=>p.enabled)), `
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitGcp()">建立</button>
+    `, true);
+  }).catch(() => {
+    openModal('新增 GCP 備份設定', gcpForm(), `
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitGcp()">建立</button>
+    `, true);
+  });
 }
 
 async function showEditGcp(id) {
   try {
-    const items = await apiGet('/api/gcpconfigs');
+    const [items, projects] = await Promise.all([
+      apiGet('/api/gcpconfigs'),
+      apiGet('/api/projects').catch(() => [])
+    ]);
     const c = items.find(x => x.id === id);
     if (!c) { toast('找不到設定','error'); return; }
-    openModal('編輯 GCP 備份設定', gcpForm(c), `
+    openModal('編輯 GCP 備份設定', gcpForm(c, projects.filter(p=>p.enabled)), `
       <button class="btn btn-secondary" onclick="closeModal()">取消</button>
       <button class="btn btn-primary" onclick="submitGcp(${id})">儲存</button>
     `, true);
@@ -1812,10 +1862,13 @@ async function showEditGcp(id) {
 }
 
 async function submitGcp(id = null) {
+  const projectIDs = Array.from(document.querySelectorAll('.gcp-proj-chk:checked'))
+    .map(el => parseInt(el.value, 10));
   const body = {
     name:          document.getElementById('gcp-name').value.trim(),
-    backup_dir:    document.getElementById('gcp-bdir').value.trim(),
-    backup_db_dir: document.getElementById('gcp-dbdir').value.trim(),
+    project_ids:   projectIDs,
+    backup_dir:    (document.getElementById('gcp-bdir')||{}).value?.trim() || '',
+    backup_db_dir: (document.getElementById('gcp-dbdir')||{}).value?.trim() || '',
     remote_user:   document.getElementById('gcp-ruser').value.trim(),
     remote_host:   document.getElementById('gcp-rhost').value.trim(),
     remote_path:   document.getElementById('gcp-rpath').value.trim(),
@@ -2223,7 +2276,130 @@ function renderPage() {
   else if (currentPage === 'gcpbackup') renderGcpBackup();
   else if (currentPage === 'integrated') renderIntegratedBackup();
   else if (currentPage === 'capabilities') renderCapabilities();
+  else if (currentPage === 'ssh-audit')    renderSshAudit();
   else renderDashboard();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SSH 稽核
+═══════════════════════════════════════════════════════════════ */
+
+let sshSince = '', sshUntil = '', sshUser = '';
+
+async function renderSshAudit() {
+  setTitle('SSH 登入稽核');
+
+  // 預設：今天
+  const today = new Date().toISOString().slice(0, 10);
+  if (!sshSince) sshSince = today + 'T00:00';
+  if (!sshUntil) { const n = new Date(); sshUntil = n.toISOString().slice(0, 16); }
+
+  setContent(`
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px">
+      <div class="form-group" style="margin:0">
+        <label class="form-label" style="font-size:13px">開始時間</label>
+        <input id="ssh-since" type="datetime-local" class="form-input" style="width:200px" value="${sshSince}" onchange="sshSince=this.value">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label" style="font-size:13px">結束時間</label>
+        <input id="ssh-until" type="datetime-local" class="form-input" style="width:200px" value="${sshUntil}" onchange="sshUntil=this.value">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label" style="font-size:13px">過濾使用者</label>
+        <input id="ssh-user" type="text" class="form-input" style="width:150px" placeholder="全部" value="${esc(sshUser)}" onchange="sshUser=this.value">
+      </div>
+      <button class="btn btn-primary" onclick="loadSshAudit()">🔍 查詢</button>
+    </div>
+    <div id="ssh-stats" class="stat-grid" style="margin-bottom:22px"></div>
+    <div class="card" style="padding:0">
+      <div id="ssh-table"><div class="loading"><div class="spinner"></div>載入中...</div></div>
+    </div>`);
+
+  await loadSshAudit();
+}
+
+async function loadSshAudit() {
+  const sinceVal = (document.getElementById('ssh-since')?.value || sshSince).replace('T', ' ') + ':00';
+  const untilVal = (document.getElementById('ssh-until')?.value || sshUntil).replace('T', ' ') + ':00';
+  const userVal  =  document.getElementById('ssh-user')?.value  || sshUser;
+
+  document.getElementById('ssh-table').innerHTML = '<div class="loading"><div class="spinner"></div>查詢中...</div>';
+  document.getElementById('ssh-stats').innerHTML = '';
+
+  try {
+    let url = `/api/ssh-audit?since=${encodeURIComponent(sinceVal)}&until=${encodeURIComponent(untilVal)}`;
+    if (userVal) url += `&user=${encodeURIComponent(userVal)}`;
+    const data = await apiGet(url);
+
+    // 統計卡
+    document.getElementById('ssh-stats').innerHTML = `
+      <div class="stat-card c-green"><div class="stat-label">成功登入</div><div class="stat-value">${data.sum_login}</div></div>
+      <div class="stat-card c-red"><div class="stat-label">登入失敗</div><div class="stat-value">${data.sum_failed}</div></div>
+      <div class="stat-card c-yellow"><div class="stat-label">sudo 操作</div><div class="stat-value">${data.sum_sudo}</div></div>
+      <div class="stat-card c-blue"><div class="stat-label">不重複使用者</div><div class="stat-value">${data.sum_unique_users}</div></div>
+      <div class="stat-card c-blue"><div class="stat-label">不重複來源 IP</div><div class="stat-value">${data.sum_unique_ips}</div></div>`;
+
+    if (!data.events.length) {
+      document.getElementById('ssh-table').innerHTML = '<div class="empty"><div class="empty-icon">🔐</div>此時段無 SSH 事件</div>';
+      return;
+    }
+
+    const rows = data.events.map(e => {
+      return `<tr>
+        <td style="white-space:nowrap;font-size:13px">${fmtDate(e.time)}</td>
+        <td>${sshTypeBadge(e.type)}</td>
+        <td>${e.user ? `<code style="font-size:13px">${esc(e.user)}</code>` : '—'}</td>
+        <td>${e.from_ip ? `<code style="font-size:13px">${esc(e.from_ip)}</code>` : '—'}</td>
+        <td>${e.method ? `<span style="font-size:13px;color:var(--text2)">${esc(e.method)}</span>` : '—'}</td>
+        <td style="max-width:340px;word-break:break-all;font-size:13px">${e.command ? `<code>${esc(e.command)}</code>` : esc(e.raw || '').slice(0, 120)}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('ssh-table').innerHTML = `
+      <div class="table-wrap" style="border-radius:0">
+        <table>
+          <thead><tr>
+            <th>時間</th><th>類型</th><th>使用者</th><th>來源 IP</th><th>認證方式</th><th>詳細</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch(e) {
+    const msg = e.message || '未知錯誤';
+    let hint = '';
+    if (msg.includes('agent 無回應') || msg.includes('connection refused')) {
+      hint = `<li>確認 agent 是否在執行：<code>systemctl status backup-agent</code></li>
+              <li>確認 agent 監聽位址：<code>ss -tlnp | grep 9090</code></li>
+              <li>確認 .env 的 AGENT_URL 設定：<code>grep AGENT_URL .env</code></li>`;
+    } else if (msg.includes('journalctl')) {
+      hint = `<li>確認 journald 是否運作：<code>systemctl status systemd-journald</code></li>
+              <li>確認 agent 執行身份（需有 journal 讀取權）：<code>systemctl show backup-agent -p User</code></li>`;
+    } else if (msg.includes('502') || msg.includes('Bad Gateway')) {
+      hint = `<li>Dashboard 無法連到 agent，請確認 AGENT_URL 路由可達</li>
+              <li>從 host 測試：<code>curl http://&lt;AGENT_URL&gt;/healthz</code></li>`;
+    }
+    document.getElementById('ssh-table').innerHTML = `
+      <div style="padding:20px;background:var(--danger-bg);border:1px solid var(--danger-border);border-radius:var(--radius);color:var(--danger)">
+        <div style="font-weight:700;font-size:15px;margin-bottom:8px">⚠️ 查詢失敗</div>
+        <div style="font-family:monospace;font-size:13px;word-break:break-all;margin-bottom:${hint ? '12px' : '0'}">${esc(msg)}</div>
+        ${hint ? `<div style="font-size:13px;color:var(--text);margin-top:8px"><b>診斷建議：</b><ul style="margin:6px 0 0 18px;line-height:1.8">${hint}</ul></div>` : ''}
+      </div>`;
+  }
+}
+
+function sshTypeBadge(type) {
+  const map = {
+    login:         ['badge-success', '✓ 登入成功'],
+    login_failed:  ['badge-failed',  '✗ 登入失敗'],
+    invalid_user:  ['badge-failed',  '✗ 無效使用者'],
+    logout:        ['badge-off',     '⎋ 登出'],
+    session_open:  ['badge-on',      '▶ 工作階段開啟'],
+    session_close: ['badge-off',     '■ 工作階段關閉'],
+    sudo:          ['badge-running', '⚡ sudo 操作'],
+    other:         ['',              '— 其他'],
+  };
+  const [cls, label] = map[type] || ['', type];
+  return `<span class="badge ${cls}" style="font-size:12px">${label}</span>`;
 }
 
 // Health check

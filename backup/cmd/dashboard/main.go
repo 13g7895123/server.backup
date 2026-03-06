@@ -61,6 +61,7 @@ func main() {
 	api.RegisterSyslogRoutes(mux, s)
 	api.RegisterGcpRoutes(mux, s)
 	api.RegisterIntegratedRoutes(mux, s, runner)
+	api.RegisterSSHAuditRoute(mux)
 	mux.HandleFunc("GET /api/capabilities", api.HandleCapabilities)
 
 	// 健康檢查

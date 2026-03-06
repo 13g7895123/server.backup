@@ -169,7 +169,7 @@ func (h *integratedHandler) runAll(w http.ResponseWriter, r *http.Request) {
 
 	// 觸發 gcp
 	gcpRows, err := h.pool.Query(ctx,
-		`SELECT id, name, backup_dir, backup_db_dir, remote_user, remote_host,
+		`SELECT id, name, project_ids, backup_dir, backup_db_dir, remote_user, remote_host,
 		        remote_path, remote_db_path, ssh_key, enabled,
 		        cron_expr, last_run_at, run_status, run_message, created_at, updated_at
 		 FROM gcp_configs WHERE enabled=true`)
@@ -177,15 +177,18 @@ func (h *integratedHandler) runAll(w http.ResponseWriter, r *http.Request) {
 		defer gcpRows.Close()
 		for gcpRows.Next() {
 			var c GcpConfig
-			if err := gcpRows.Scan(&c.ID, &c.Name, &c.BackupDir, &c.BackupDbDir,
+			if err := gcpRows.Scan(&c.ID, &c.Name, &c.ProjectIDs, &c.BackupDir, &c.BackupDbDir,
 				&c.RemoteUser, &c.RemoteHost, &c.RemotePath, &c.RemoteDbPath,
 				&c.SshKey, &c.Enabled, &c.CronExpr, &c.LastRunAt, &c.RunStatus,
 				&c.RunMessage, &c.CreatedAt, &c.UpdatedAt); err == nil {
+				if c.ProjectIDs == nil {
+					c.ProjectIDs = []int{}
+				}
 				id := c.ID
 				h.pool.Exec(ctx, //nolint
 					`UPDATE gcp_configs SET run_status='running', run_message='', updated_at=NOW() WHERE id=$1`, id)
 				go func(cfg GcpConfig) {
-					msg, runErr := executeGcpBackup(cfg)
+					msg, runErr := executeGcpBackup(context.Background(), h.pool, cfg)
 					status := "success"
 					if runErr != nil {
 						status = "failed"
@@ -252,21 +255,24 @@ func (h *integratedHandler) batchRun(w http.ResponseWriter, r *http.Request) {
 		case "gcp":
 			var c GcpConfig
 			err := h.pool.QueryRow(ctx,
-				`SELECT id, name, backup_dir, backup_db_dir, remote_user, remote_host,
+				`SELECT id, name, project_ids, backup_dir, backup_db_dir, remote_user, remote_host,
 				        remote_path, remote_db_path, ssh_key, enabled,
 				        cron_expr, last_run_at, run_status, run_message, created_at, updated_at
 				 FROM gcp_configs WHERE id=$1`, item.ID).
-				Scan(&c.ID, &c.Name, &c.BackupDir, &c.BackupDbDir,
+				Scan(&c.ID, &c.Name, &c.ProjectIDs, &c.BackupDir, &c.BackupDbDir,
 					&c.RemoteUser, &c.RemoteHost, &c.RemotePath, &c.RemoteDbPath,
 					&c.SshKey, &c.Enabled, &c.CronExpr, &c.LastRunAt,
 					&c.RunStatus, &c.RunMessage, &c.CreatedAt, &c.UpdatedAt)
 			if err != nil {
 				continue
 			}
+			if c.ProjectIDs == nil {
+				c.ProjectIDs = []int{}
+			}
 			h.pool.Exec(ctx, //nolint
 				`UPDATE gcp_configs SET run_status='running', run_message='', updated_at=NOW() WHERE id=$1`, c.ID)
 			go func(cfg GcpConfig) {
-				msg, runErr := executeGcpBackup(cfg)
+				msg, runErr := executeGcpBackup(context.Background(), h.pool, cfg)
 				status := "success"
 				if runErr != nil {
 					status = "failed"

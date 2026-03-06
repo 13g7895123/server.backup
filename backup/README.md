@@ -16,6 +16,8 @@
 8. [部署架構](#部署架構)
 9. [環境變數](#環境變數)
 10. [API 路由表](#api-路由表)
+11. [快速開始](#快速開始)
+12. [Rebuild 指南](#rebuild-指南)
 
 ---
 
@@ -446,4 +448,124 @@ sudo DASHBOARD_URL=http://127.0.0.1:8105 bash scripts/install-agent.sh
 # 5. 確認狀態
 systemctl status backup-agent
 docker compose ps
+```
+
+---
+
+## Rebuild 指南
+
+每次修改 Go 原始碼後，依照下列步驟重新部署。
+
+### 情境 A — 只改了 dashboard（容器端）
+
+```bash
+cd /path/to/backup
+
+# 重新 build image 並重啟容器（--no-deps 不重啟 postgres）
+docker compose up -d --build --no-deps dashboard
+```
+
+驗證：
+
+```bash
+docker compose ps          # dashboard 狀態應為 Up
+docker compose logs -f dashboard --tail=30
+curl http://localhost:${DASHBOARD_PORT}/healthz   # 回應 200 即正常
+```
+
+---
+
+### 情境 B — 只改了 agent（host 端）
+
+```bash
+cd /path/to/backup
+
+# 1. 重新編譯 binary
+bash scripts/build-agent.sh
+# → 產出 backup-agent（linux/amd64 靜態 binary）
+
+# 2. 更新並重啟 systemd 服務（需 root）
+sudo cp backup-agent /usr/local/bin/backup-agent
+sudo systemctl restart backup-agent
+```
+
+驗證：
+
+```bash
+systemctl status backup-agent
+journalctl -fu backup-agent --no-pager -n 30
+
+# 確認 SSH 稽核 API 可用
+curl http://localhost:9090/ssh-audit
+```
+
+---
+
+### 情境 C — dashboard 與 agent 都改了（完整 rebuild）
+
+```bash
+cd /path/to/backup
+
+# 步驟 1：停止 agent
+sudo systemctl stop backup-agent
+
+# 步驟 2：重新 build 並重啟 dashboard 容器
+docker compose up -d --build --no-deps dashboard
+
+# 步驟 3：重新編譯 agent binary
+bash scripts/build-agent.sh
+
+# 步驟 4：更新 agent binary 並重啟服務
+sudo cp backup-agent /usr/local/bin/backup-agent
+sudo systemctl start backup-agent
+```
+
+驗證：
+
+```bash
+# dashboard
+docker compose ps
+curl http://localhost:${DASHBOARD_PORT}/healthz
+
+# agent
+systemctl status backup-agent
+curl http://localhost:9090/ssh-audit
+```
+
+---
+
+### 情境 D — 資料庫 migration 有變動
+
+新增了 `migrations/` 下的 `.sql` 檔案時，migration 在 dashboard 啟動時**自動執行**，不需手動介入。
+
+```bash
+# 重啟 dashboard 即可套用新 migration
+docker compose up -d --build --no-deps dashboard
+
+# 確認 migration 正常
+docker compose logs dashboard | grep -E "migration|初始化"
+```
+
+> ⚠️ migration 設計為冪等（`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`），重複執行安全。
+
+---
+
+### 緊急回滾
+
+若新版本有問題，快速回到上一個 image：
+
+```bash
+# 查看可用的舊 image
+docker images | grep backup
+
+# 強制指定舊 image tag 並重啟（以 <image_id> 為例）
+docker compose down
+docker tag <image_id> backup-backup-dashboard:latest
+docker compose up -d
+
+# agent 回滾：重新 checkout 舊版再編譯
+git stash           # 或 git checkout <commit>
+bash scripts/build-agent.sh
+sudo cp backup-agent /usr/local/bin/backup-agent
+sudo systemctl restart backup-agent
 ```
