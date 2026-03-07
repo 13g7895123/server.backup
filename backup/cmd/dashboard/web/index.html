@@ -1538,21 +1538,24 @@ async function renderSyslogs() {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>名稱</th><th>類型</th><th>來源日誌路徑</th><th>目的地</th><th>壓縮</th><th>狀態</th><th>最後執行</th><th style="text-align:right">操作</th>
+            <th>名稱</th><th>類型</th><th>來源</th><th>目的地</th><th>壓縮</th><th>狀態</th><th>最後執行</th><th style="text-align:right">操作</th>
           </tr></thead>
           <tbody>${items.map(c => `<tr>
             <td><strong>${esc(c.name)}</strong></td>
             <td><span class="badge ${c.log_type==='auth'?'badge-files':'badge-system'}">${c.log_type==='auth'?'🔐 Auth':'🖥 System'}</span></td>
-            <td><span class="mono" style="font-size:12px">${esc((c.log_files||[]).join(', '))}</span></td>
+            <td><span class="mono" style="font-size:12px">${c.source_type==='journal'?'📄 journal: '+(c.journal_units||[]).join(', '):esc((c.log_files||[]).join(', '))}</span></td>
             <td><span class="mono" style="font-size:12px">${esc(c.dest)}</span></td>
             <td>${c.compress ? '<span style="color:var(--success)">✓</span>' : '<span style="color:var(--text3)">—</span>'}</td>
             <td><span class="badge ${c.enabled?'badge-on':'badge-off'}">${c.enabled?'啟用':'停用'}</span></td>
-            <td style="font-size:12px">${runStatusBadge(c.run_status)}${c.last_run_at?'<br><span style="color:var(--text3)">'+fmtDate(c.last_run_at)+'</span>':''}</td>
+            <td style="font-size:12px">${runStatusBadge(c.run_status, c.run_message)}${c.last_run_at?'<br><span style="color:var(--text3)">'+fmtDate(c.last_run_at)+'</span>':''}</td>
             <td class="td-actions">
-              <button class="btn btn-xs btn-success" onclick="runSyslog(${c.id})" title="${esc(c.run_message||'')}">▶ 執行</button>
+              <button class="btn btn-xs btn-success" onclick="runSyslog(${c.id})">▶ 執行</button>
+              <button class="btn btn-xs btn-secondary" onclick="testBackup('syslog',${c.id},'${esc(c.name)}')">🔍 測試</button>
+              <button class="btn btn-xs btn-secondary" onclick="showSyslogRecords(${c.id},'${esc(c.name)}')">📋 紀錄</button>
+              <button class="btn btn-xs btn-ghost" onclick="window.open('/api/syslogs/${c.id}/export','_blank')">⬇ 匯出</button>
               <button class="btn btn-xs btn-secondary" onclick="showEditSyslog(${c.id})">編輯</button>
               <button class="btn btn-xs btn-ghost" onclick="toggleSyslog(${c.id},${!c.enabled})">${c.enabled?'停用':'啟用'}</button>
-              <button class="btn btn-xs btn-danger" onclick="deleteSyslog(${c.id},'${esc(c.name)}')">刪除</button>
+              <button class="btn btn-xs btn-danger" onclick="deleteSyslog(${c.id},'${esc(c.name)}')">🗑</button>
             </td>
           </tr>`).join('')}</tbody>
         </table>
@@ -1747,8 +1750,9 @@ async function renderGcpBackup() {
           </div>
           <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <button class="btn btn-xs btn-success" onclick="runGcp(${c.id})">▶ 執行 rsync</button>
-            <button class="btn btn-xs btn-secondary" onclick="previewGcpScript(${c.id})">👁 預覽 Shell 腳本</button>
-            <span style="margin-left:auto;font-size:12px">${runStatusBadge(c.run_status)}${c.last_run_at?' <span style=\'color:var(--text3)\'>'+fmtDate(c.last_run_at)+'</span>':''}</span>
+            <button class="btn btn-xs btn-secondary" onclick="testBackup('gcp',${c.id},'${esc(c.name)}')">🔍 測試</button>
+            <button class="btn btn-xs btn-secondary" onclick="previewGcpScript(${c.id})">👁 預覽腳本</button>
+            <span style="margin-left:auto;font-size:12px">${runStatusBadge(c.run_status, c.run_message)}${c.last_run_at?' <span style=\'color:var(--text3)\'>'+fmtDate(c.last_run_at)+'</span>':''}</span>
           </div>
         </div>`;
         }).join('')}
@@ -1961,14 +1965,67 @@ async function copyGcpScript(id) {
 /* ═══════════════════════════════════════════════════════════════
    輔助函式：run_status badge
 ═══════════════════════════════════════════════════════════════ */
-function runStatusBadge(status) {
+function runStatusBadge(status, msg = '') {
   if (!status) return '';
+  if (status === 'failed' && msg) {
+    return `<span style="color:var(--danger);font-size:11px;cursor:pointer;text-decoration:underline dotted" onclick="showRunMsg(${JSON.stringify(msg)})">✕ 失敗 ⓘ</span>`;
+  }
   const map = {
     running: '<span style="color:var(--warning);font-size:11px">⏳ 執行中</span>',
     success: '<span style="color:var(--success);font-size:11px">✓ 成功</span>',
     failed:  '<span style="color:var(--danger);font-size:11px">✕ 失敗</span>',
   };
   return map[status] || `<span style="font-size:11px">${esc(status)}</span>`;
+}
+
+function showRunMsg(msg) {
+  openModal('執行錯誤詳細', `
+    <div style="background:#1e293b;color:#fca5a5;padding:14px;border-radius:6px;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;overflow-y:auto;max-height:420px">${esc(msg)}</div>
+  `, `<button class="btn btn-secondary" onclick="closeModal()">關閉</button>`, true);
+}
+
+async function showSyslogRecords(id, name) {
+  try {
+    const recs = await apiGet(`/api/syslogs/${id}/records?limit=30`);
+    const rows = recs.length === 0
+      ? '<tr><td colspan="4" style="text-align:center;color:var(--text3)">尚無執行紀錄</td></tr>'
+      : recs.map(r => `<tr>
+          <td style="font-size:12px">${fmtDate(r.created_at)}</td>
+          <td>${statusBadge(r.status, r.error_msg)}</td>
+          <td style="font-size:12px">${r.duration_sec > 0 ? fmtDuration(r.duration_sec) : '—'}</td>
+          <td style="font-size:12px;max-width:320px">
+            ${r.error_msg ? `<span style="color:var(--danger);cursor:pointer" onclick="showRunMsg(${JSON.stringify(r.error_msg)})">${esc(r.error_msg.substring(0,80))}${r.error_msg.length>80?'…':''}</span>` : '<span style="color:var(--text3)">—</span>'}
+          </td>
+        </tr>`).join('');
+    openModal(`執行紀錄: ${esc(name)}`, `
+      <div style="overflow-x:auto">
+      <table><thead><tr><th>時間</th><th>狀態</th><th>耗時</th><th>錯誤訊息</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`,
+      `<button class="btn btn-secondary" onclick="closeModal()">關閉</button>`, true);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function testBackup(type, id, name) {
+  const url = type === 'syslog' ? `/api/syslogs/${id}/test` : `/api/gcpconfigs/${id}/test`;
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = '檢測中...'; }
+  try {
+    const res = await apiPost(url, {});
+    const rows = (res.checks || []).map(c => `
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:16px;flex-shrink:0">${c.ok ? '✅' : '❌'}</span>
+        <div>
+          <div style="font-weight:600;font-size:13px;color:${c.ok?'var(--text)':'var(--danger)'}">${esc(c.name)}</div>
+          ${c.detail ? `<div style="font-size:12px;color:var(--text2);font-family:monospace;margin-top:2px;word-break:break-all">${esc(c.detail)}</div>` : ''}
+        </div>
+      </div>`).join('');
+    const overall = res.ok
+      ? '<div style="color:var(--success);font-weight:700;margin-bottom:12px">✅ 所有檢查通過</div>'
+      : '<div style="color:var(--danger);font-weight:700;margin-bottom:12px">❌ 部分檢查未通過</div>';
+    openModal(`備份前檢測: ${esc(name)}`, overall + rows,
+      `<button class="btn btn-secondary" onclick="closeModal()">關閉</button>`, true);
+  } catch(e) { toast(e.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔍 測試'; } }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2000,7 +2057,7 @@ async function renderIntegratedBackup() {
         <td><strong>${esc(it.name)}</strong></td>
         <td><span class="badge ${it.enabled?'badge-on':'badge-off'}">${it.enabled?'啟用':'停用'}</span></td>
         <td><span class="mono" style="font-size:12px;color:var(--text2)">${esc(it.cron_expr)||'<span style="color:var(--text3)">未設定</span>'}</span></td>
-        <td style="font-size:12px">${runStatusBadge(it.run_status)}${it.last_run_at?'<br><span style="color:var(--text3)">'+fmtDate(it.last_run_at)+'</span>':''}</td>
+        <td style="font-size:12px">${runStatusBadge(it.run_status, it.run_message)}${it.last_run_at?'<br><span style="color:var(--text3)">'+fmtDate(it.last_run_at)+'</span>':''}</td>
         <td class="td-actions">${runBtn}</td>
       </tr>`;
     }

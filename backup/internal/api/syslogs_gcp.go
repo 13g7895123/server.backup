@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"backup-manager/internal/store"
@@ -62,11 +63,21 @@ type GcpConfig struct {
 
 // ── handler ───────────────────────────────────────────────────────────────────
 
-type syslogHandler struct{ pool *pgxpool.Pool }
+type syslogHandler struct {
+	pool  *pgxpool.Pool
+	store *store.Store
+}
 type gcpHandler struct{ pool *pgxpool.Pool }
 
+// testCheck 用於 test endpoint 回傳每個檢查項目的結果
+type testCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
 func RegisterSyslogRoutes(mux *http.ServeMux, s *store.Store) {
-	h := &syslogHandler{pool: s.Pool()}
+	h := &syslogHandler{pool: s.Pool(), store: s}
 	mux.HandleFunc("GET /api/syslogs", h.list)
 	mux.HandleFunc("POST /api/syslogs", h.create)
 	mux.HandleFunc("PUT /api/syslogs/{id}", h.update)
@@ -74,6 +85,9 @@ func RegisterSyslogRoutes(mux *http.ServeMux, s *store.Store) {
 	mux.HandleFunc("PATCH /api/syslogs/{id}/toggle", h.toggle)
 	mux.HandleFunc("POST /api/syslogs/{id}/run", h.run)
 	mux.HandleFunc("PATCH /api/syslogs/{id}/schedule", h.setSchedule)
+	mux.HandleFunc("GET /api/syslogs/{id}/records", h.listRecords)
+	mux.HandleFunc("GET /api/syslogs/{id}/export", h.exportConfig)
+	mux.HandleFunc("POST /api/syslogs/{id}/test", h.test)
 }
 
 func RegisterGcpRoutes(mux *http.ServeMux, s *store.Store) {
@@ -85,6 +99,7 @@ func RegisterGcpRoutes(mux *http.ServeMux, s *store.Store) {
 	mux.HandleFunc("PATCH /api/gcpconfigs/{id}/toggle", h.toggle)
 	mux.HandleFunc("POST /api/gcpconfigs/{id}/run", h.run)
 	mux.HandleFunc("PATCH /api/gcpconfigs/{id}/schedule", h.setSchedule)
+	mux.HandleFunc("POST /api/gcpconfigs/{id}/test", h.test)
 }
 
 // ── SyslogConfig CRUD ─────────────────────────────────────────────────────────
@@ -277,13 +292,29 @@ func (h *syslogHandler) run(w http.ResponseWriter, r *http.Request) {
 	}
 	h.pool.Exec(r.Context(), //nolint
 		`UPDATE syslog_configs SET run_status='running', run_message='', updated_at=NOW() WHERE id=$1`, id)
+
+	// 建立備份紀錄
+	rec := &store.BackupRecord{
+		ProjectName: c.Name,
+		Type:        "syslog",
+		SubType:     strconv.Itoa(c.ID),
+		Label:       c.Name,
+		Filename:    time.Now().Format("2006-01-02") + "/",
+		Path:        c.Dest,
+		TriggeredBy: "manual",
+	}
+	recID, _ := h.store.CreateRecord(r.Context(), rec)
+	start := time.Now()
+
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered", "message": "日誌備份已開始"})
 	go func() {
 		msg, runErr := executeSyslogBackup(c)
 		status := "success"
+		errStr := ""
 		if runErr != nil {
 			status = "failed"
 			msg = runErr.Error()
+			errStr = msg
 			log.Printf("[syslog-run] id=%d 失敗: %v", id, runErr)
 		} else {
 			log.Printf("[syslog-run] id=%d 完成: %s", id, msg)
@@ -292,7 +323,170 @@ func (h *syslogHandler) run(w http.ResponseWriter, r *http.Request) {
 		h.pool.Exec(context.Background(), //nolint
 			`UPDATE syslog_configs SET run_status=$1, run_message=$2, last_run_at=$3, updated_at=NOW() WHERE id=$4`,
 			status, msg, now, id)
+		// 更新備份紀錄
+		if recID > 0 {
+			rec.ID = recID
+			rec.Status = status
+			rec.DurationSec = time.Since(start).Seconds()
+			rec.ErrorMsg = errStr
+			h.store.UpdateRecord(context.Background(), rec) //nolint
+		}
 	}()
+}
+
+// listRecords 查詢此 syslog 設定的備份執行紀錄
+func (h *syslogHandler) listRecords(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 id")
+		return
+	}
+	limit := 30
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, e := strconv.Atoi(q); e == nil && n > 0 {
+			limit = n
+		}
+	}
+	rows, err := h.pool.Query(r.Context(), `
+		SELECT id, status, COALESCE(error_msg,''), COALESCE(duration_sec,0), filename, created_at
+		FROM backup_records
+		WHERE type='syslog' AND sub_type=$1
+		ORDER BY created_at DESC
+		LIMIT $2`, strconv.Itoa(id), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	type RunRecord struct {
+		ID          int64     `json:"id"`
+		Status      string    `json:"status"`
+		ErrorMsg    string    `json:"error_msg"`
+		DurationSec float64   `json:"duration_sec"`
+		Filename    string    `json:"filename"`
+		CreatedAt   time.Time `json:"created_at"`
+	}
+	var records []RunRecord
+	for rows.Next() {
+		var rec RunRecord
+		if err := rows.Scan(&rec.ID, &rec.Status, &rec.ErrorMsg, &rec.DurationSec, &rec.Filename, &rec.CreatedAt); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		records = append(records, rec)
+	}
+	if records == nil {
+		records = []RunRecord{}
+	}
+	writeJSON(w, http.StatusOK, records)
+}
+
+// exportConfig 匯出此 syslog 設定為 JSON
+func (h *syslogHandler) exportConfig(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 id")
+		return
+	}
+	var c SyslogConfig
+	err = h.pool.QueryRow(r.Context(), `
+		SELECT id, name, log_type, source_type, log_files, journal_units, journal_format,
+		       dest, compress, enabled,
+		       cron_expr, last_run_at, run_status, run_message, created_at, updated_at
+		FROM syslog_configs WHERE id=$1`, id).
+		Scan(&c.ID, &c.Name, &c.LogType, &c.SourceType, &c.LogFiles,
+			&c.JournalUnits, &c.JournalFormat,
+			&c.Dest, &c.Compress, &c.Enabled, &c.CronExpr, &c.LastRunAt,
+			&c.RunStatus, &c.RunMessage, &c.CreatedAt, &c.UpdatedAt)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "找不到設定")
+		return
+	}
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="syslog_%s_%s.json"`, c.Name, time.Now().Format("2006-01-02")))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(c) //nolint
+}
+
+// test 執行備份前的預檢診斷
+func (h *syslogHandler) test(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 id")
+		return
+	}
+	var c SyslogConfig
+	err = h.pool.QueryRow(r.Context(), `
+		SELECT id, name, log_type, source_type, log_files, journal_units, journal_format,
+		       dest, compress, enabled,
+		       cron_expr, last_run_at, run_status, run_message, created_at, updated_at
+		FROM syslog_configs WHERE id=$1`, id).
+		Scan(&c.ID, &c.Name, &c.LogType, &c.SourceType, &c.LogFiles,
+			&c.JournalUnits, &c.JournalFormat,
+			&c.Dest, &c.Compress, &c.Enabled, &c.CronExpr, &c.LastRunAt,
+			&c.RunStatus, &c.RunMessage, &c.CreatedAt, &c.UpdatedAt)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "找不到設定")
+		return
+	}
+
+	var checks []testCheck
+	allOK := true
+
+	if c.SourceType == "journal" {
+		out, e := exec.Command("journalctl", "--version").Output() //nolint:gosec
+		if e != nil {
+			checks = append(checks, testCheck{"journalctl 可用", false, e.Error()})
+			allOK = false
+		} else {
+			ver := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
+			checks = append(checks, testCheck{"journalctl 可用", true, ver})
+		}
+		for _, unit := range c.JournalUnits {
+			if unit == "" {
+				continue
+			}
+			ou, eu := exec.Command("journalctl", "-u", unit, "-n", "1", "--no-pager").CombinedOutput() //nolint:gosec
+			if eu != nil {
+				detail := strings.TrimSpace(string(ou))
+				if detail == "" {
+					detail = eu.Error()
+				}
+				checks = append(checks, testCheck{"Unit: " + unit, false, detail})
+				allOK = false
+			} else {
+				checks = append(checks, testCheck{"Unit: " + unit, true, "可正常查詢"})
+			}
+		}
+	} else {
+		for _, f := range c.LogFiles {
+			if f == "" {
+				continue
+			}
+			info, e := os.Stat(f)
+			if e != nil {
+				checks = append(checks, testCheck{"來源：" + f, false, e.Error()})
+				allOK = false
+			} else {
+				checks = append(checks, testCheck{"來源：" + f, true,
+					fmt.Sprintf("存在，大小 %d bytes", info.Size())})
+			}
+		}
+	}
+
+	// 檢查目的地父層目錄
+	if _, e := os.Stat(c.Dest); e != nil {
+		if e2 := os.MkdirAll(c.Dest, 0o755); e2 != nil {
+			checks = append(checks, testCheck{"目的地目錄", false, e2.Error()})
+			allOK = false
+		} else {
+			checks = append(checks, testCheck{"目的地目錄（已建立）", true, c.Dest})
+		}
+	} else {
+		checks = append(checks, testCheck{"目的地目錄", true, c.Dest})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": allOK, "checks": checks})
 }
 
 func executeSyslogBackup(c SyslogConfig) (string, error) {
@@ -616,6 +810,102 @@ type gcpProjectInfo struct {
 	ID      int
 	Name    string
 	NasBase string
+}
+
+// test 執行 GCP 備份前的預檢診斷
+func (h *gcpHandler) test(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 id")
+		return
+	}
+	var c GcpConfig
+	err = h.pool.QueryRow(r.Context(), `
+		SELECT id, name, project_ids, backup_dir, backup_db_dir, remote_user, remote_host,
+		       remote_path, remote_db_path, ssh_key, enabled,
+		       cron_expr, last_run_at, run_status, run_message, created_at, updated_at
+		FROM gcp_configs WHERE id=$1`, id).
+		Scan(&c.ID, &c.Name, &c.ProjectIDs, &c.BackupDir, &c.BackupDbDir,
+			&c.RemoteUser, &c.RemoteHost, &c.RemotePath, &c.RemoteDbPath,
+			&c.SshKey, &c.Enabled, &c.CronExpr, &c.LastRunAt, &c.RunStatus,
+			&c.RunMessage, &c.CreatedAt, &c.UpdatedAt)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "找不到設定")
+		return
+	}
+	if c.ProjectIDs == nil {
+		c.ProjectIDs = []int{}
+	}
+
+	var checks []testCheck
+	allOK := true
+
+	// 檢查 SSH Key 檔案
+	if _, e := os.Stat(c.SshKey); e != nil {
+		checks = append(checks, testCheck{"SSH Key 存在", false, e.Error()})
+		allOK = false
+	} else {
+		checks = append(checks, testCheck{"SSH Key 存在", true, c.SshKey})
+	}
+
+	// 檢查 rsync
+	out, e := exec.Command("rsync", "--version").Output() //nolint:gosec
+	if e != nil {
+		checks = append(checks, testCheck{"rsync 可用", false, e.Error()})
+		allOK = false
+	} else {
+		ver := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
+		checks = append(checks, testCheck{"rsync 可用", true, ver})
+	}
+
+	// 測試 SSH 連線（timeout 8s）
+	sshOut, sshErr := exec.Command("ssh", //nolint:gosec
+		"-i", c.SshKey,
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=8",
+		"-o", "StrictHostKeyChecking=no",
+		c.RemoteUser+"@"+c.RemoteHost, "echo ok").CombinedOutput()
+	if sshErr != nil {
+		detail := strings.TrimSpace(string(sshOut))
+		if detail == "" {
+			detail = sshErr.Error()
+		}
+		checks = append(checks, testCheck{
+			fmt.Sprintf("SSH %s@%s", c.RemoteUser, c.RemoteHost), false, detail})
+		allOK = false
+	} else {
+		checks = append(checks, testCheck{
+			fmt.Sprintf("SSH %s@%s", c.RemoteUser, c.RemoteHost), true, "連線成功"})
+	}
+
+	// 若有關聯專案，檢查各 nas_base 目錄
+	if len(c.ProjectIDs) > 0 {
+		prows, qErr := h.pool.Query(r.Context(),
+			`SELECT name, nas_base FROM projects WHERE id = ANY($1)`, c.ProjectIDs)
+		if qErr == nil {
+			defer prows.Close()
+			for prows.Next() {
+				var pname, nasBase string
+				prows.Scan(&pname, &nasBase) //nolint
+				if _, e := os.Stat(nasBase); e != nil {
+					checks = append(checks, testCheck{"專案 " + pname + " nas_base", false, e.Error()})
+					allOK = false
+				} else {
+					checks = append(checks, testCheck{"專案 " + pname + " nas_base", true, nasBase})
+				}
+			}
+		}
+	} else {
+		// fallback 模式：檢查 backup_dir
+		if _, e := os.Stat(c.BackupDir); e != nil {
+			checks = append(checks, testCheck{"本地備份目錄", false, e.Error()})
+			allOK = false
+		} else {
+			checks = append(checks, testCheck{"本地備份目錄", true, c.BackupDir})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": allOK, "checks": checks})
 }
 
 func executeGcpBackup(ctx context.Context, pool *pgxpool.Pool, c GcpConfig) (string, error) {
