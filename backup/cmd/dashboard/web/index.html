@@ -1800,19 +1800,12 @@ function gcpForm(c = {}, projects = []) {
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">本地備份目錄</label>
-            <input id="gcp-bdir" class="form-input" value="${esc(c.backup_dir||'/mnt/nas/backup/project/professional')}" placeholder="/mnt/nas/backup/project/...">
+            <input id="gcp-bdir" class="form-input" value="${esc(c.backup_dir||'/volume1/debian/backup-new/projects/01_rootadviser/files')}" placeholder="/volume1/debian/backup-new/projects/...">  
             <div class="form-hint">$DATE 日期子目錄會自動附加</div>
           </div>
           <div class="form-group">
             <label class="form-label">本地 DB 備份目錄</label>
-            <input id="gcp-dbdir" class="form-input" value="${esc(c.backup_db_dir||'/mnt/nas/backup/database/professional')}" placeholder="/mnt/nas/backup/database/...">
-          </div>
-        </div>
-      </div>
-    </details>
-      <div class="form-group">
-            <label class="form-label">本地 DB 備份目錄</label>
-            <input id="gcp-dbdir" class="form-input" value="${esc(c.backup_db_dir||'/mnt/nas/backup/database/professional')}" placeholder="/mnt/nas/backup/database/...">
+            <input id="gcp-dbdir" class="form-input" value="${esc(c.backup_db_dir||'/volume1/debian/backup-new/projects/01_rootadviser/db')}" placeholder="/volume1/debian/backup-new/projects/.../db">
           </div>
         </div>
       </div>

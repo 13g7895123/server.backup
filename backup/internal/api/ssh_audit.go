@@ -178,15 +178,21 @@ func sshAuditCore(w http.ResponseWriter, r *http.Request) {
 
 // CollectSSHEvents 呼叫 journalctl 並解析所有 sshd / sudo 事件（導出供 agent 使用）
 func CollectSSHEvents(since, until string) ([]SSHEvent, error) {
-	// 同時讀取 sshd 和 sudo 的 journal
+	// 同時抓 sshd/ssh（Debian 用 ssh.service，RHEL 用 sshd.service）和 sudo。
+	// 同欄位多值 = OR；「+」是跨群組 OR（時間過濾 --since/--until 全域有效，不受 + 影響）。
+	// 策略：SYSLOG_IDENTIFIER 覆蓋大多數系統；_COMM 作為 fallback（未設 SYSLOG_IDENTIFIER 時）。
 	args := []string{
 		"--no-pager",
 		"-o", "json",
 		"--since", since,
 		"--until", until,
-		// journalctl 同欄位多值 = OR
+		// 群組 1：SYSLOG_IDENTIFIER（sshd 或 ssh 或 sudo）
 		"SYSLOG_IDENTIFIER=sshd",
+		"SYSLOG_IDENTIFIER=ssh",
 		"SYSLOG_IDENTIFIER=sudo",
+		// 群組 2：以 process name 識別（_COMM），透過 + 做 OR
+		"+", "_COMM=sshd",
+		"+", "_COMM=sudo",
 	}
 
 	cmd := exec.Command("journalctl", args...) //nolint:gosec

@@ -449,7 +449,7 @@ func (h *syslogHandler) test(w http.ResponseWriter, r *http.Request) {
 			checks, allOK, proxyErr := proxySyslogTest(agentURL, c)
 			if proxyErr != nil {
 				writeJSON(w, http.StatusOK, map[string]any{
-					"ok": false,
+					"ok":     false,
 					"checks": []testCheck{{"連線 agent", false, proxyErr.Error()}},
 				})
 				return
