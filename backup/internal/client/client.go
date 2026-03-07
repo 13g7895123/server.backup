@@ -101,6 +101,12 @@ func (c *DashboardClient) UpdateScheduleRunTime(ctx context.Context, id int, las
 		"next_run_at": nextRun,
 	}, nil)
 }
+func (c *DashboardClient) UpdateScheduleStatus(ctx context.Context, id int, status string) error {
+	return c.do(ctx, "POST", fmt.Sprintf("/api/agent/schedules/%d/status", id), map[string]any{
+		"status": status,
+	}, nil)
+}
+
 
 // ── Retention ──────────────────────────────────────────────────────────────
 

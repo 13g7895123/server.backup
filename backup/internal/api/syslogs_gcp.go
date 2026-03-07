@@ -65,10 +65,14 @@ type GcpConfig struct {
 // ── handler ───────────────────────────────────────────────────────────────────
 
 type syslogHandler struct {
-	pool  *pgxpool.Pool
-	store *store.Store
+	pool   *pgxpool.Pool
+	store  *store.Store
+	sgSched *SyslogGcpScheduler
 }
-type gcpHandler struct{ pool *pgxpool.Pool }
+type gcpHandler struct {
+	pool   *pgxpool.Pool
+	sgSched *SyslogGcpScheduler
+}
 
 // testCheck 用於 test endpoint 回傳每個檢查項目的結果
 type testCheck struct {
@@ -77,8 +81,8 @@ type testCheck struct {
 	Detail string `json:"detail"`
 }
 
-func RegisterSyslogRoutes(mux *http.ServeMux, s *store.Store) {
-	h := &syslogHandler{pool: s.Pool(), store: s}
+func RegisterSyslogRoutes(mux *http.ServeMux, s *store.Store, sgSched *SyslogGcpScheduler) {
+	h := &syslogHandler{pool: s.Pool(), store: s, sgSched: sgSched}
 	mux.HandleFunc("GET /api/syslogs", h.list)
 	mux.HandleFunc("POST /api/syslogs", h.create)
 	mux.HandleFunc("PUT /api/syslogs/{id}", h.update)
@@ -91,8 +95,8 @@ func RegisterSyslogRoutes(mux *http.ServeMux, s *store.Store) {
 	mux.HandleFunc("POST /api/syslogs/{id}/test", h.test)
 }
 
-func RegisterGcpRoutes(mux *http.ServeMux, s *store.Store) {
-	h := &gcpHandler{pool: s.Pool()}
+func RegisterGcpRoutes(mux *http.ServeMux, s *store.Store, sgSched *SyslogGcpScheduler) {
+	h := &gcpHandler{pool: s.Pool(), sgSched: sgSched}
 	mux.HandleFunc("GET /api/gcpconfigs", h.list)
 	mux.HandleFunc("POST /api/gcpconfigs", h.create)
 	mux.HandleFunc("PUT /api/gcpconfigs/{id}", h.update)
@@ -222,6 +226,9 @@ func (h *syslogHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if h.sgSched != nil {
+		h.sgSched.RemoveSyslog(id)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -245,6 +252,9 @@ func (h *syslogHandler) toggle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": body.Enabled})
+	if h.sgSched != nil {
+		h.sgSched.ReloadSyslog(id)
+	}
 }
 
 // ── SyslogConfig run / schedule ───────────────────────────────────────────────
@@ -269,6 +279,9 @@ func (h *syslogHandler) setSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"cron_expr": body.CronExpr})
+	if h.sgSched != nil {
+		h.sgSched.ReloadSyslog(id)
+	}
 }
 
 func (h *syslogHandler) run(w http.ResponseWriter, r *http.Request) {
@@ -833,6 +846,9 @@ func (h *gcpHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if h.sgSched != nil {
+		h.sgSched.RemoveGcp(id)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -856,6 +872,9 @@ func (h *gcpHandler) toggle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": body.Enabled})
+	if h.sgSched != nil {
+		h.sgSched.ReloadGcp(id)
+	}
 }
 
 // ── GcpConfig run / schedule ──────────────────────────────────────────────────
@@ -880,6 +899,9 @@ func (h *gcpHandler) setSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"cron_expr": body.CronExpr})
+	if h.sgSched != nil {
+		h.sgSched.ReloadGcp(id)
+	}
 }
 
 func (h *gcpHandler) run(w http.ResponseWriter, r *http.Request) {

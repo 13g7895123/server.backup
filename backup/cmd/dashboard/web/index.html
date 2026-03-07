@@ -344,16 +344,27 @@ async function renderDashboard() {
   setTitle('總覽');
   loading();
   try {
-    const [summary, records] = await Promise.all([
+    const [summary, records, syslogs, gcps, projScheds] = await Promise.all([
       apiGet('/api/summary'),
-      apiGet('/api/backups?limit=8')
+      apiGet('/api/backups?limit=8'),
+      apiGet('/api/syslogs'),
+      apiGet('/api/gcpconfigs'),
+      apiGet('/api/schedules/all'),
     ]);
     const projs = summary.projects || [];
     const recs  = records.records  || [];
+    const syls  = syslogs || [];
+    const gcpArr = gcps || [];
+    const scheds = projScheds || [];
 
-    const totalBackups = projs.reduce((a, p) => a + (p.total_count||0), 0);
-    const totalFailed  = projs.reduce((a, p) => a + (p.failed_count||0), 0);
-    const totalGB      = projs.reduce((a, p) => a + (p.total_size_gb||0), 0);
+    const totalBackups  = projs.reduce((a, p) => a + (p.total_count||0), 0);
+    const totalFailed   = projs.reduce((a, p) => a + (p.failed_count||0), 0);
+    const totalGB       = projs.reduce((a, p) => a + (p.total_size_gb||0), 0);
+    const schedEnabled  = scheds.filter(s => s.enabled).length;
+    const sylsEnabled   = syls.filter(s => s.enabled).length;
+    const sylsFailed    = syls.filter(s => s.run_status === 'failed').length;
+    const gcpsEnabled   = gcpArr.filter(g => g.enabled).length;
+    const gcpsFailed    = gcpArr.filter(g => g.run_status === 'failed').length;
 
     setContent(`
       <div class="stat-grid">
@@ -379,6 +390,24 @@ async function renderDashboard() {
         </div>
       </div>
 
+      <div class="stat-grid" style="margin-top:12px">
+        <div class="stat-card c-blue">
+          <div class="stat-label">🗓 排程管理</div>
+          <div class="stat-value">${schedEnabled}</div>
+          <div class="stat-sub">共 ${scheds.length} 個，啟用 ${schedEnabled} 個</div>
+        </div>
+        <div class="stat-card ${sylsFailed>0?'c-red':'c-green'}">
+          <div class="stat-label">📋 系統日誌備份</div>
+          <div class="stat-value">${syls.length}</div>
+          <div class="stat-sub">啟用 ${sylsEnabled} 個${sylsFailed>0?`，<span style="color:var(--danger)">${sylsFailed} 個失敗</span>`:''}</div>
+        </div>
+        <div class="stat-card ${gcpsFailed>0?'c-red':'c-green'}">
+          <div class="stat-label">☁️ GCP 備份</div>
+          <div class="stat-value">${gcpArr.length}</div>
+          <div class="stat-sub">啟用 ${gcpsEnabled} 個${gcpsFailed>0?`，<span style="color:var(--danger)">${gcpsFailed} 個失敗</span>`:''}</div>
+        </div>
+      </div>
+
       <div class="sg">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
           <h2 style="font-size:15px;font-weight:700">專案狀態</h2>
@@ -400,6 +429,63 @@ async function renderDashboard() {
               <div class="proj-stat-item"><strong>${(p.total_size_gb||0).toFixed(2)}</strong> GB</div>
             </div>
           </div>`).join('')}</div>`}
+      </div>
+
+      <div class="sg">
+        <div class="flex-c" style="margin-bottom:12px">
+          <h2 style="font-size:15px;font-weight:700">🗓 排程執行狀態</h2>
+          <button class="btn btn-sm btn-secondary ml-a" onclick="navigate('schedules')">管理排程</button>
+        </div>
+        ${scheds.length === 0 ? '<div class="empty" style="padding:16px"><div class="empty-icon">🕐</div>尚無專案排程</div>' : `
+        <div class="table-wrap"><table>
+          <thead><tr><th>專案</th><th>標籤</th><th>Cron</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
+          <tbody>${scheds.map(s => `<tr>
+            <td><strong>${esc(s.project_name||'')}</strong></td>
+            <td>${esc(s.label||'—')}</td>
+            <td><span class="mono">${esc(s.cron_expr)}</span></td>
+            <td>${runStatusBadge(s.last_run_status)}</td>
+            <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at)}</td>
+            <td style="font-size:12px;white-space:nowrap">${fmtDate(s.next_run_at)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`}
+      </div>
+
+      <div class="sg">
+        <div class="flex-c" style="margin-bottom:12px">
+          <h2 style="font-size:15px;font-weight:700">📋 系統日誌備份狀態</h2>
+          <button class="btn btn-sm btn-secondary ml-a" onclick="navigate('syslogs')">管理日誌備份</button>
+        </div>
+        ${syls.length === 0 ? '<div class="empty" style="padding:16px"><div class="empty-icon">📋</div>尚無系統日誌備份設定</div>' : `
+        <div class="table-wrap"><table>
+          <thead><tr><th>名稱</th><th>類型</th><th>排程</th><th>啟用</th><th>上次執行結果</th><th>最後執行</th></tr></thead>
+          <tbody>${syls.map(s => `<tr>
+            <td><strong>${esc(s.name)}</strong></td>
+            <td><span class="badge ${s.log_type==='auth'?'badge-files':'badge-system'}">${s.log_type==='auth'?'🔐 Auth':'🖥 System'}</span></td>
+            <td>${s.cron_expr?`<span class="mono" style="font-size:11px">${esc(s.cron_expr)}</span>`:'<span style="color:var(--text2);font-size:11px">未設定</span>'}</td>
+            <td><span class="badge ${s.enabled?'badge-on':'badge-off'}">${s.enabled?'啟用':'停用'}</span></td>
+            <td style="font-size:12px">${runStatusBadge(s.run_status, s.run_message)}</td>
+            <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at)||'—'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`}
+      </div>
+
+      <div class="sg">
+        <div class="flex-c" style="margin-bottom:12px">
+          <h2 style="font-size:15px;font-weight:700">☁️ GCP 備份狀態</h2>
+          <button class="btn btn-sm btn-secondary ml-a" onclick="navigate('gcpbackup')">管理 GCP 備份</button>
+        </div>
+        ${gcpArr.length === 0 ? '<div class="empty" style="padding:16px"><div class="empty-icon">☁️</div>尚無 GCP 備份設定</div>' : `
+        <div class="table-wrap"><table>
+          <thead><tr><th>名稱</th><th>遠端主機</th><th>排程</th><th>啟用</th><th>上次執行結果</th><th>最後執行</th></tr></thead>
+          <tbody>${gcpArr.map(g => `<tr>
+            <td><strong>${esc(g.name)}</strong></td>
+            <td><span class="mono" style="font-size:11px">${esc(g.remote_user)}@${esc(g.remote_host)}</span></td>
+            <td>${g.cron_expr?`<span class="mono" style="font-size:11px">${esc(g.cron_expr)}</span>`:'<span style="color:var(--text2);font-size:11px">未設定</span>'}</td>
+            <td><span class="badge ${g.enabled?'badge-on':'badge-off'}">${g.enabled?'啟用':'停用'}</span></td>
+            <td style="font-size:12px">${runStatusBadge(g.run_status, g.run_message)}</td>
+            <td style="font-size:12px;white-space:nowrap">${fmtDate(g.last_run_at)||'—'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`}
       </div>
 
       <div class="sg">
@@ -1155,12 +1241,13 @@ async function renderSchedulesTab(id) {
       ${(!schedules||schedules.length===0) ? '<div class="empty"><div class="empty-icon">🕐</div>尚無排程</div>' : `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>標籤</th><th>Cron 表達式</th><th>備份類型</th><th>狀態</th><th>最後執行</th><th>下次執行</th><th style="text-align:right">操作</th></tr></thead>
+          <thead><tr><th>標籤</th><th>Cron 表達式</th><th>備份類型</th><th>狀態</th><th>上次結果</th><th>最後執行</th><th>下次執行</th><th style="text-align:right">操作</th></tr></thead>
           <tbody>${schedules.map(s => `<tr>
             <td>${esc(s.label||'—')}</td>
             <td><span class="mono">${esc(s.cron_expr)}</span></td>
             <td>${(s.target_types||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
             <td><span class="badge ${s.enabled?'badge-on':'badge-off'}">${s.enabled?'啟用':'停用'}</span></td>
+            <td style="font-size:12px">${runStatusBadge(s.last_run_status)}</td>
             <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at)}</td>
             <td style="font-size:12px;white-space:nowrap">${fmtDate(s.next_run_at)}</td>
             <td class="td-actions">
@@ -2368,13 +2455,14 @@ async function renderAllSchedules() {
         ${_mgmtSchedules.length === 0
           ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無專案排程</div>'
           : `<div class="table-wrap"><table>
-              <thead><tr><th>專案</th><th>標籤</th><th>Cron</th><th>備份類型</th><th>狀態</th><th>下次執行</th><th>最後執行</th><th>操作</th></tr></thead>
+              <thead><tr><th>專案</th><th>標籤</th><th>Cron</th><th>備份類型</th><th>狀態</th><th>上次結果</th><th>下次執行</th><th>最後執行</th><th>操作</th></tr></thead>
               <tbody>${_mgmtSchedules.map(s => `<tr>
                 <td><strong>${esc(s.project_name)}</strong></td>
                 <td>${esc(s.label||'—')}</td>
                 <td><span class="mono">${esc(s.cron_expr)}</span></td>
                 <td>${(s.target_types||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
                 <td><span class="badge ${s.enabled?'badge-on':'badge-off'}">${s.enabled?'啟用':'停用'}</span></td>
+                <td style="font-size:12px">${runStatusBadge(s.last_run_status)}</td>
                 <td style="font-size:12px;white-space:nowrap">${fmtDate(s.next_run_at)}</td>
                 <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at)}</td>
                 <td class="td-actions">

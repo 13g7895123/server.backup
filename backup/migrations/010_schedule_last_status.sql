@@ -1,0 +1,1 @@
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS last_run_status VARCHAR(20);

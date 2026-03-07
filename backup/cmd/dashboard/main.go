@@ -51,6 +51,12 @@ func main() {
 		defer sched.Stop()
 	}
 
+	sgSched := api.NewSyslogGcpScheduler(s.Pool(), s)
+	if err := sgSched.Start(ctx); err != nil {
+		log.Printf("[dashboard] syslog/gcp 排程器啟動失敗: %v", err)
+	}
+	defer sgSched.Stop()
+
 	addr := getEnvOr("DASHBOARD_ADDR", ":8080")
 	mux := http.NewServeMux()
 
@@ -63,8 +69,8 @@ func main() {
 	api.RegisterTriggerRoute(mux, s, runner)
 	api.RegisterSummaryRoute(mux, s)
 	api.RegisterAgentRoutes(mux, s)
-	api.RegisterSyslogRoutes(mux, s)
-	api.RegisterGcpRoutes(mux, s)
+	api.RegisterSyslogRoutes(mux, s, sgSched)
+	api.RegisterGcpRoutes(mux, s, sgSched)
 	api.RegisterIntegratedRoutes(mux, s, runner)
 	api.RegisterSSHAuditRoute(mux)
 	mux.HandleFunc("GET /api/capabilities", api.HandleCapabilities)

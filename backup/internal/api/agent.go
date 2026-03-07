@@ -32,6 +32,7 @@ func RegisterAgentRoutes(mux *http.ServeMux, s *store.Store) {
 	mux.HandleFunc("GET /api/agent/schedules/enabled", agentMiddleware(h.listEnabledSchedules))
 	mux.HandleFunc("GET /api/agent/schedules/{id}", agentMiddleware(h.getSchedule))
 	mux.HandleFunc("POST /api/agent/schedules/{id}/runtime", agentMiddleware(h.updateRuntime))
+	mux.HandleFunc("POST /api/agent/schedules/{id}/status", agentMiddleware(h.updateStatus))
 
 	// 備份紀錄 CRUD（agent 建立 + 更新）
 	mux.HandleFunc("POST /api/agent/records", agentMiddleware(h.createRecord))
@@ -79,6 +80,27 @@ func (h *agentHandler) updateRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.UpdateScheduleRunTime(r.Context(), id, body.LastRunAt, body.NextRunAt); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/agent/schedules/{id}/status
+func (h *agentHandler) updateStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 id")
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 JSON")
+		return
+	}
+	if err := h.store.UpdateScheduleStatus(r.Context(), id, body.Status); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -42,16 +42,17 @@ type BackupTarget struct {
 
 // Schedule 對應 schedules 表
 type Schedule struct {
-	ID          int        `json:"id"`
-	ProjectID   int        `json:"project_id"`
-	Label       string     `json:"label"`
-	CronExpr    string     `json:"cron_expr"`
-	TargetTypes []string   `json:"target_types"`
-	Enabled     bool       `json:"enabled"`
-	LastRunAt   *time.Time `json:"last_run_at"`
-	NextRunAt   *time.Time `json:"next_run_at"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	ID            int        `json:"id"`
+	ProjectID     int        `json:"project_id"`
+	Label         string     `json:"label"`
+	CronExpr      string     `json:"cron_expr"`
+	TargetTypes   []string   `json:"target_types"`
+	Enabled       bool       `json:"enabled"`
+	LastRunAt     *time.Time `json:"last_run_at"`
+	NextRunAt     *time.Time `json:"next_run_at"`
+	LastRunStatus string     `json:"last_run_status"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // RetentionPolicy 對應 retention_policies 表
@@ -243,7 +244,7 @@ func (s *Store) DeleteTarget(ctx context.Context, id int) error {
 func (s *Store) ListSchedules(ctx context.Context, projectID int) ([]Schedule, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, project_id, label, cron_expr, target_types, enabled,
-		       last_run_at, next_run_at, created_at, updated_at
+		       last_run_at, next_run_at, COALESCE(last_run_status,''), created_at, updated_at
 		FROM schedules WHERE project_id=$1 ORDER BY id`, projectID)
 	if err != nil {
 		return nil, err
@@ -255,7 +256,7 @@ func (s *Store) ListSchedules(ctx context.Context, projectID int) ([]Schedule, e
 func (s *Store) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT s.id, s.project_id, s.label, s.cron_expr, s.target_types, s.enabled,
-		       s.last_run_at, s.next_run_at, s.created_at, s.updated_at
+		       s.last_run_at, s.next_run_at, COALESCE(s.last_run_status,''), s.created_at, s.updated_at
 		FROM schedules s
 		JOIN projects p ON p.id = s.project_id
 		WHERE s.enabled = true AND p.enabled = true
@@ -278,7 +279,7 @@ func scanSchedules(rows pgxRows) ([]Schedule, error) {
 		var sch Schedule
 		if err := rows.Scan(&sch.ID, &sch.ProjectID, &sch.Label, &sch.CronExpr,
 			&sch.TargetTypes, &sch.Enabled, &sch.LastRunAt, &sch.NextRunAt,
-			&sch.CreatedAt, &sch.UpdatedAt); err != nil {
+			&sch.LastRunStatus, &sch.CreatedAt, &sch.UpdatedAt); err != nil {
 			return nil, err
 		}
 		schedules = append(schedules, sch)
@@ -290,11 +291,11 @@ func (s *Store) GetSchedule(ctx context.Context, id int) (*Schedule, error) {
 	var sch Schedule
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, project_id, label, cron_expr, target_types, enabled,
-		       last_run_at, next_run_at, created_at, updated_at
+		       last_run_at, next_run_at, COALESCE(last_run_status,''), created_at, updated_at
 		FROM schedules WHERE id=$1`, id).
 		Scan(&sch.ID, &sch.ProjectID, &sch.Label, &sch.CronExpr,
 			&sch.TargetTypes, &sch.Enabled, &sch.LastRunAt, &sch.NextRunAt,
-			&sch.CreatedAt, &sch.UpdatedAt)
+			&sch.LastRunStatus, &sch.CreatedAt, &sch.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +338,12 @@ func (s *Store) UpdateScheduleRunTime(ctx context.Context, id int, lastRun, next
 	return err
 }
 
-// ── RetentionPolicies ─────────────────────────────────────────────────────────
+func (s *Store) UpdateScheduleStatus(ctx context.Context, id int, status string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE schedules SET last_run_status=$1 WHERE id=$2`,
+		status, id)
+	return err
+}
 
 func (s *Store) ListRetention(ctx context.Context, projectID int) ([]RetentionPolicy, error) {
 	rows, err := s.pool.Query(ctx, `

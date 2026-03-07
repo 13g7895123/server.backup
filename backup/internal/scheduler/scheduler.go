@@ -19,6 +19,7 @@ type ScheduleStore interface {
 	ListEnabledSchedules(ctx context.Context) ([]store.Schedule, error)
 	GetSchedule(ctx context.Context, id int) (*store.Schedule, error)
 	UpdateScheduleRunTime(ctx context.Context, id int, lastRun, nextRun time.Time) error
+	UpdateScheduleStatus(ctx context.Context, id int, status string) error
 }
 
 // DynamicScheduler 動態管理 cron 排程，無需重啟即可更新
@@ -120,7 +121,12 @@ func (ds *DynamicScheduler) addJob(ctx context.Context, sch store.Schedule) erro
 		next := ds.cron.Entry(ds.jobs[schedID]).Next
 
 		_ = ds.store.UpdateScheduleRunTime(ctx, schedID, now, next)
-		_ = ds.runner.RunProject(ctx, projID, targetTypes, &schedID, "schedule")
+		runErr := ds.runner.RunProject(ctx, projID, targetTypes, &schedID, "schedule")
+		status := "success"
+		if runErr != nil {
+			status = "failed"
+		}
+		_ = ds.store.UpdateScheduleStatus(ctx, schedID, status)
 	})
 	if err != nil {
 		return fmt.Errorf("無效 cron 表達式 %q: %w", sch.CronExpr, err)
