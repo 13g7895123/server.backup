@@ -1719,7 +1719,7 @@ async function renderBackups() {
       ${recs.length===0 ? '<div class="empty"><div class="empty-icon">🗂</div>沒有符合條件的備份紀錄</div>' : `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>專案</th><th>類型</th><th>檔案名稱</th><th>狀態</th><th>大小</th><th>耗時</th><th>觸發方式</th><th>时間</th><th></th></tr></thead>
+          <thead><tr><th>專案</th><th>類型</th><th>檔案名稱</th><th>狀態</th><th>大小</th><th>耗時</th><th>觸發方式</th><th>時間</th><th></th></tr></thead>
           <tbody>${recs.map(r => `<tr>
             <td><span style="font-weight:600">${esc(r.project_name)}</span></td>
             <td>${typeBadge(r.type)}</td>
