@@ -2347,6 +2347,10 @@ async function renderAllSchedules() {
     setContent(`
       <div class="page-hdr">
         <div class="page-hdr-left"><h1>排程管理</h1><p>統一管理所有備份排程</p></div>
+        <div style="text-align:right">
+          <div id="sched-clock" style="font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:2px;color:var(--primary);font-family:monospace"></div>
+          <div id="sched-date"  style="font-size:12px;color:var(--text2);margin-top:2px"></div>
+        </div>
       </div>
 
       <div class="sg">
@@ -2417,7 +2421,28 @@ async function renderAllSchedules() {
             </table></div>`}
       </div>
     `);
+
+    _startSchedClock();
+
   } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
+}
+
+let _schedClockTimer = null;
+
+function _startSchedClock() {
+  if (_schedClockTimer) clearInterval(_schedClockTimer);
+  function tick() {
+    if (currentPage !== 'schedules') { clearInterval(_schedClockTimer); _schedClockTimer = null; return; }
+    const now  = new Date();
+    const hms  = now.toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const date = now.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' });
+    const el   = document.getElementById('sched-clock');
+    const de   = document.getElementById('sched-date');
+    if (el) el.textContent = hms;
+    if (de) de.textContent = date;
+  }
+  tick();
+  _schedClockTimer = setInterval(tick, 1000);
 }
 
 function showAddScheduleForMgmt() {

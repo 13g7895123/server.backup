@@ -47,6 +47,7 @@ services:
       HOST_PREFIX: /host
       NAS_BASE: /mnt/nas/backups
       DASHBOARD_ADDR: :8080
+      TZ: Asia/Taipei
     secrets:
       - pg_password
 
