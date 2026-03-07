@@ -289,8 +289,8 @@ function statusBadge(s, msg = '') {
 }
 
 function typeBadge(t) {
-  const map = { files:'badge-files', database:'badge-database', system:'badge-system' };
-  const labels = { files:'檔案', database:'資料庫', system:'系統' };
+  const map = { files:'badge-files', database:'badge-database', system:'badge-system', syslog:'badge-files', gcp:'badge-database' };
+  const labels = { files:'檔案', database:'資料庫', system:'系統', syslog:'系統日誌', gcp:'GCP' };
   return `<span class="badge ${map[t]||''}">${labels[t]||esc(t)}</span>`;
 }
 
@@ -356,19 +356,225 @@ function loading() {
 /* ═══════════════════════════════════════════════════════════════
    Dashboard
 ═══════════════════════════════════════════════════════════════ */
+function renderDashFreq(key) {
+  const d = window._dashData;
+  if (!d) return;
+
+  document.querySelectorAll('#dash-freq-tabs .tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.key === key);
+  });
+
+  const items = d.allItems.filter(it => cronFrequency(it.cron) === key);
+
+  function periodRange(isPrev) {
+    const now   = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (key === 'daily') {
+      const s = isPrev ? new Date(+today - 86400000) : today;
+      const e = isPrev ? today : now;
+      return { start: s, end: e, label: isPrev ? '昨日' : '今日' };
+    }
+    if (key === 'weekly') {
+      const wd  = today.getDay();
+      const mon = new Date(+today - (wd === 0 ? 6 : wd - 1) * 86400000);
+      const s   = isPrev ? new Date(+mon - 7 * 86400000) : mon;
+      const e   = isPrev ? mon : now;
+      return { start: s, end: e, label: isPrev ? '上週' : '本週' };
+    }
+    if (key === 'monthly') {
+      const thisM = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastM = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const s     = isPrev ? lastM : thisM;
+      const e     = isPrev ? thisM : now;
+      return { start: s, end: e, label: isPrev ? '上月' : '本月' };
+    }
+    return { start: new Date(0), end: now, label: isPrev ? '上期' : '本期' };
+  }
+
+  const curr = periodRange(false);
+  const prev = periodRange(true);
+  const filterRecs = range => d.allRecs.filter(r => {
+    const t = new Date(r.created_at);
+    return t >= range.start && t < range.end;
+  });
+  const currRecs = filterRecs(curr);
+  const prevRecs = filterRecs(prev);
+
+  const stat = recs => ({
+    total: recs.length,
+    ok:    recs.filter(r => r.status === 'success').length,
+    fail:  recs.filter(r => r.status === 'failed').length,
+  });
+  const cs = stat(currRecs), ps = stat(prevRecs);
+
+  const statCard = (st, label) => {
+    const cls = st.fail > 0 ? 'c-red' : st.ok > 0 ? 'c-green' : '';
+    return `<div class="stat-card ${cls}" style="flex:1;min-width:150px">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value">${st.total}</div>
+      <div class="stat-sub">
+        <span style="color:var(--success)">✓ ${st.ok} 成功</span>
+        ${st.fail > 0 ? `&nbsp;<span style="color:var(--danger)">✕ ${st.fail} 失敗</span>` : ''}
+      </div>
+    </div>`;
+  };
+
+  const itemRows = items.length === 0
+    ? `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">此頻率無排程項目</td></tr>`
+    : items.map(it => `<tr>
+        <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
+        <td><strong>${it.name}</strong></td>
+        <td><span class="mono" style="font-size:11px">${esc(it.cron)}</span></td>
+        <td>${runStatusBadge(it.status, it.errMsg)}</td>
+        <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
+      </tr>`).join('');
+
+  const recRows = recs => recs.slice(0, 15).map(r => `<tr>
+    <td>${typeBadge(r.type)}</td>
+    <td><span class="truncate">${esc(r.project_name||r.label||'—')}</span></td>
+    <td>${statusBadge(r.status, r.error_msg)}</td>
+    <td>${fmtSize(r.size_bytes)}</td>
+    <td style="font-size:12px;white-space:nowrap">${fmtDate(r.created_at)}</td>
+  </tr>`).join('');
+
+  const recSection = (label, recs) => recs.length === 0
+    ? `<div style="color:var(--text3);font-size:12px;padding:4px 0">${label}：無備份紀錄</div>`
+    : `<div style="font-size:12px;font-weight:600;margin:14px 0 6px;color:var(--text)">${label} 備份紀錄（${recs.length} 筆）</div>
+       <div class="table-wrap"><table>
+         <thead><tr><th>類型</th><th>名稱</th><th>狀態</th><th>大小</th><th>時間</th></tr></thead>
+         <tbody>${recRows(recs)}</tbody>
+       </table></div>`;
+
+  document.getElementById('dash-freq-content').innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      ${statCard(cs, curr.label + ' 備份統計')}
+      ${statCard(ps, prev.label + ' 備份統計')}
+    </div>
+    <div class="table-wrap" style="margin-bottom:4px"><table>
+      <thead><tr><th>類別</th><th>名稱</th><th>Cron</th><th>上次結果</th><th>最後執行</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table></div>
+    ${recSection(curr.label, currRecs)}
+    ${recSection(prev.label, prevRecs)}
+  `;
+}
+
+function renderDashFreq(key) {
+  const d = window._dashData;
+  if (!d) return;
+
+  document.querySelectorAll('#dash-freq-tabs .tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.key === key);
+  });
+
+  const items = d.allItems.filter(it => cronFrequency(it.cron) === key);
+
+  function periodRange(isPrev) {
+    const now   = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (key === 'daily') {
+      const s = isPrev ? new Date(+today - 86400000) : today;
+      const e = isPrev ? today : now;
+      return { start: s, end: e, label: isPrev ? '昨日' : '今日' };
+    }
+    if (key === 'weekly') {
+      const wd  = today.getDay();
+      const mon = new Date(+today - (wd === 0 ? 6 : wd - 1) * 86400000);
+      const s   = isPrev ? new Date(+mon - 7 * 86400000) : mon;
+      const e   = isPrev ? mon : now;
+      return { start: s, end: e, label: isPrev ? '上週' : '本週' };
+    }
+    if (key === 'monthly') {
+      const thisM = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastM = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const s     = isPrev ? lastM : thisM;
+      const e     = isPrev ? thisM : now;
+      return { start: s, end: e, label: isPrev ? '上月' : '本月' };
+    }
+    return { start: new Date(0), end: now, label: isPrev ? '上期' : '本期' };
+  }
+
+  const curr = periodRange(false);
+  const prev = periodRange(true);
+  const filterRecs = range => d.allRecs.filter(r => {
+    const t = new Date(r.created_at);
+    return t >= range.start && t < range.end;
+  });
+  const currRecs = filterRecs(curr);
+  const prevRecs = filterRecs(prev);
+
+  const stat = recs => ({
+    total: recs.length,
+    ok:    recs.filter(r => r.status === 'success').length,
+    fail:  recs.filter(r => r.status === 'failed').length,
+  });
+  const cs = stat(currRecs), ps = stat(prevRecs);
+
+  const statCard = (st, label) => {
+    const cls = st.fail > 0 ? 'c-red' : st.ok > 0 ? 'c-green' : '';
+    return `<div class="stat-card ${cls}" style="flex:1;min-width:150px">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value">${st.total}</div>
+      <div class="stat-sub">
+        <span style="color:var(--success)">✓ ${st.ok} 成功</span>
+        ${st.fail > 0 ? `&nbsp;<span style="color:var(--danger)">✕ ${st.fail} 失敗</span>` : ''}
+      </div>
+    </div>`;
+  };
+
+  const itemRows = items.length === 0
+    ? `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">此頻率無排程項目</td></tr>`
+    : items.map(it => `<tr>
+        <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
+        <td><strong>${it.name}</strong></td>
+        <td><span class="mono" style="font-size:11px">${esc(it.cron)}</span></td>
+        <td>${runStatusBadge(it.status, it.errMsg)}</td>
+        <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
+      </tr>`).join('');
+
+  const recRows = recs => recs.slice(0, 15).map(r => `<tr>
+    <td>${typeBadge(r.type)}</td>
+    <td><span class="truncate">${esc(r.project_name||r.label||'—')}</span></td>
+    <td>${statusBadge(r.status, r.error_msg)}</td>
+    <td>${fmtSize(r.size_bytes)}</td>
+    <td style="font-size:12px;white-space:nowrap">${fmtDate(r.created_at)}</td>
+  </tr>`).join('');
+
+  const recSection = (label, recs) => recs.length === 0
+    ? `<div style="color:var(--text3);font-size:12px;padding:4px 0">${label}：無備份紀錄</div>`
+    : `<div style="font-size:12px;font-weight:600;margin:14px 0 6px;color:var(--text)">${label} 備份紀錄（${recs.length} 筆）</div>
+       <div class="table-wrap"><table>
+         <thead><tr><th>類型</th><th>名稱</th><th>狀態</th><th>大小</th><th>時間</th></tr></thead>
+         <tbody>${recRows(recs)}</tbody>
+       </table></div>`;
+
+  document.getElementById('dash-freq-content').innerHTML = `
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      ${statCard(cs, curr.label + ' 備份統計')}
+      ${statCard(ps, prev.label + ' 備份統計')}
+    </div>
+    <div class="table-wrap" style="margin-bottom:4px"><table>
+      <thead><tr><th>類別</th><th>名稱</th><th>Cron</th><th>上次結果</th><th>最後執行</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table></div>
+    ${recSection(curr.label, currRecs)}
+    ${recSection(prev.label, prevRecs)}
+  `;
+}
+
 async function renderDashboard() {
   setTitle('總覽');
   loading();
   try {
     const [summary, records, syslogs, gcps, projScheds] = await Promise.all([
       apiGet('/api/summary'),
-      apiGet('/api/backups?limit=8'),
+      apiGet('/api/backups?limit=200'),
       apiGet('/api/syslogs'),
       apiGet('/api/gcpconfigs'),
       apiGet('/api/schedules/all'),
     ]);
     const projs   = summary.projects || [];
-    const recs    = records.records  || [];
+    const allRecs = records.records  || [];
     const syls    = syslogs || [];
     const gcpArr  = gcps || [];
     const scheds  = projScheds || [];
@@ -382,7 +588,6 @@ async function renderDashboard() {
     const gcpsEnabled  = gcpArr.filter(g => g.enabled).length;
     const gcpsFailed   = gcpArr.filter(g => g.run_status === 'failed').length;
 
-    // 整合所有已啟用且有排程的備份項目
     const allItems = [
       ...scheds.filter(s => s.enabled && s.cron_expr).map(s => ({
         typeLabel: '🗓 專案排程', typeClass: 'badge-system',
@@ -404,38 +609,17 @@ async function renderDashboard() {
       })),
     ];
 
-    const freqGroups = [
-      { key: 'daily',   label: '每日備份排程', icon: '📅' },
-      { key: 'weekly',  label: '每周備份排程', icon: '📆' },
-      { key: 'monthly', label: '每月備份排程', icon: '🗓' },
-      { key: 'other',   label: '其他排程',     icon: '⏰' },
+    window._dashData = { allItems, allRecs };
+
+    const freqTabDefs = [
+      { key: 'daily',   label: '📅 每日' },
+      { key: 'weekly',  label: '📆 每周' },
+      { key: 'monthly', label: '🗓 每月' },
+      { key: 'other',   label: '⏰ 其他' },
     ];
-
-    const freqTableRows = items => items.map(it => `
-      <tr>
-        <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
-        <td><strong>${it.name}</strong></td>
-        <td><span class="mono" style="font-size:11px">${esc(it.cron)}</span></td>
-        <td>${runStatusBadge(it.status, it.errMsg)}</td>
-        <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
-        <td style="font-size:12px;white-space:nowrap">${it.nextRun ? fmtDate(it.nextRun) : '—'}</td>
-      </tr>`).join('');
-
-    const freqSections = freqGroups.map(fg => {
-      const items = allItems.filter(it => cronFrequency(it.cron) === fg.key);
-      if (!items.length) return '';
-      return `
-        <div class="sg">
-          <div class="flex-c" style="margin-bottom:12px">
-            <h2 style="font-size:15px;font-weight:700">${fg.icon} ${fg.label}</h2>
-            <span class="badge badge-system ml-a" style="font-size:11px">${items.length} 項</span>
-          </div>
-          <div class="table-wrap"><table>
-            <thead><tr><th>類別</th><th>名稱</th><th>Cron</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
-            <tbody>${freqTableRows(items)}</tbody>
-          </table></div>
-        </div>`;
-    }).join('');
+    const activeTabs = freqTabDefs.filter(t => allItems.some(it => cronFrequency(it.cron) === t.key));
+    const defaultTab = activeTabs.length ? activeTabs[0].key : 'daily';
+    const recentRecs = allRecs.slice(0, 8);
 
     setContent(`
       <div class="stat-grid">
@@ -449,7 +633,7 @@ async function renderDashboard() {
           <div class="stat-value">${totalBackups}</div>
           <div class="stat-sub">歷史備份紀錄</div>
         </div>
-        <div class="stat-card c-red">
+        <div class="stat-card ${totalFailed>0?'c-red':'c-green'}">
           <div class="stat-label">失敗次數</div>
           <div class="stat-value">${totalFailed}</div>
           <div class="stat-sub">需要關注</div>
@@ -459,41 +643,20 @@ async function renderDashboard() {
           <div class="stat-value">${totalGB.toFixed(1)}</div>
           <div class="stat-sub">GB</div>
         </div>
-      </div>
-
-      <div class="stat-grid" style="margin-top:12px">
         <div class="stat-card c-blue">
           <div class="stat-label">🗓 排程管理</div>
           <div class="stat-value">${schedEnabled}</div>
           <div class="stat-sub">共 ${scheds.length} 個，啟用 ${schedEnabled} 個</div>
         </div>
         <div class="stat-card ${sylsFailed>0?'c-red':'c-green'}">
-          <div class="stat-label">📋 系統日誌備份</div>
+          <div class="stat-label">📋 系統日誌</div>
           <div class="stat-value">${syls.length}</div>
-          <div class="stat-sub">啟用 ${sylsEnabled} 個${sylsFailed>0?`，<span style="color:var(--danger)">${sylsFailed} 個失敗</span>`:''}</div>
+          <div class="stat-sub">啟用 ${sylsEnabled} 個${sylsFailed>0?`，<span style="color:var(--danger)">${sylsFailed} 失敗</span>`:''}</div>
         </div>
         <div class="stat-card ${gcpsFailed>0?'c-red':'c-green'}">
           <div class="stat-label">☁️ GCP 備份</div>
           <div class="stat-value">${gcpArr.length}</div>
-          <div class="stat-sub">啟用 ${gcpsEnabled} 個${gcpsFailed>0?`，<span style="color:var(--danger)">${gcpsFailed} 個失敗</span>`:''}</div>
-        </div>
-      </div>
-
-      <div class="stat-grid" style="margin-top:12px">
-        <div class="stat-card c-blue">
-          <div class="stat-label">🗓 排程管理</div>
-          <div class="stat-value">${schedEnabled}</div>
-          <div class="stat-sub">共 ${scheds.length} 個，啟用 ${schedEnabled} 個</div>
-        </div>
-        <div class="stat-card ${sylsFailed>0?'c-red':'c-green'}">
-          <div class="stat-label">📋 系統日誌備份</div>
-          <div class="stat-value">${syls.length}</div>
-          <div class="stat-sub">啟用 ${sylsEnabled} 個${sylsFailed>0?`，<span style="color:var(--danger)">${sylsFailed} 個失敗</span>`:''}</div>
-        </div>
-        <div class="stat-card ${gcpsFailed>0?'c-red':'c-green'}">
-          <div class="stat-label">☁️ GCP 備份</div>
-          <div class="stat-value">${gcpArr.length}</div>
-          <div class="stat-sub">啟用 ${gcpsEnabled} 個${gcpsFailed>0?`，<span style="color:var(--danger)">${gcpsFailed} 個失敗</span>`:''}</div>
+          <div class="stat-sub">啟用 ${gcpsEnabled} 個${gcpsFailed>0?`，<span style="color:var(--danger)">${gcpsFailed} 失敗</span>`:''}</div>
         </div>
       </div>
 
@@ -506,9 +669,7 @@ async function renderDashboard() {
           `<div class="proj-grid">${projs.map(p => `
           <div class="proj-card" onclick="navigate('project', ${p.project_id})">
             <div class="proj-card-top">
-              <div>
-                <h3>${esc(p.project_name)}</h3>
-              </div>
+              <div><h3>${esc(p.project_name)}</h3></div>
               ${statusBadge(p.last_status||'—')}
             </div>
             <div style="font-size:12px;color:var(--text2)">最後備份：${fmtDate(p.last_backup_at)}</div>
@@ -520,25 +681,28 @@ async function renderDashboard() {
           </div>`).join('')}</div>`}
       </div>
 
-      ${allItems.length === 0 ? `
-        <div class="sg">
-          <div class="empty" style="padding:16px"><div class="empty-icon">⏰</div>目前沒有啟用中且有排程的備份設定</div>
+      <div class="sg">
+        <div class="flex-c" style="margin-bottom:4px">
+          <h2 style="font-size:15px;font-weight:700">📊 頻率分組備份狀況</h2>
+          <button class="btn btn-sm btn-secondary ml-a" onclick="renderDashboard()">↺ 重新整理</button>
         </div>
-      ` : freqSections}
+        ${allItems.length === 0
+          ? '<div class="empty" style="padding:16px"><div class="empty-icon">⏰</div>目前沒有啟用中且有排程的備份設定</div>'
+          : `<div class="tabs" id="dash-freq-tabs">
+              ${activeTabs.map(t => `<div class="tab${t.key===defaultTab?' active':''}" data-key="${t.key}" onclick="renderDashFreq('${t.key}')">${t.label}</div>`).join('')}
+             </div>
+             <div id="dash-freq-content"></div>`}
       </div>
 
       <div class="sg">
         <div class="flex-c" style="margin-bottom:12px">
           <h2 style="font-size:15px;font-weight:700">最近備份紀錄</h2>
-          <button class="btn btn-sm btn-secondary ml-a" onclick="renderDashboard()">↺ 重新整理</button>
         </div>
-        ${recs.length === 0 ? '<div class="empty"><div class="empty-icon">🗂</div>尚無備份紀錄</div>' : `
+        ${recentRecs.length === 0 ? '<div class="empty"><div class="empty-icon">🗂</div>尚無備份紀錄</div>' : `
         <div class="table-wrap">
           <table>
-            <thead><tr>
-              <th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>時間</th><th>耗時</th>
-            </tr></thead>
-            <tbody>${recs.map(r => `<tr>
+            <thead><tr><th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>時間</th><th>耗時</th></tr></thead>
+            <tbody>${recentRecs.map(r => `<tr>
               <td><span class="truncate">${esc(r.project_name)}</span></td>
               <td>${typeBadge(r.type)}</td>
               <td>${statusBadge(r.status, r.error_msg)}</td>
@@ -550,6 +714,9 @@ async function renderDashboard() {
         </div>`}
       </div>
     `);
+
+    if (allItems.length > 0) renderDashFreq(defaultTab);
+
   } catch(e) {
     setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`);
   }
