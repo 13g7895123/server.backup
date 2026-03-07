@@ -566,18 +566,20 @@ async function renderDashboard() {
   setTitle('總覽');
   loading();
   try {
-    const [summary, records, syslogs, gcps, projScheds] = await Promise.all([
+    const [summary, records, syslogs, gcps, projScheds, allProjects] = await Promise.all([
       apiGet('/api/summary'),
       apiGet('/api/backups?limit=200'),
       apiGet('/api/syslogs'),
       apiGet('/api/gcpconfigs'),
       apiGet('/api/schedules/all'),
+      apiGet('/api/projects'),
     ]);
     const projs   = summary.projects || [];
     const allRecs = records.records  || [];
     const syls    = syslogs || [];
     const gcpArr  = gcps || [];
     const scheds  = projScheds || [];
+    const projDescMap = Object.fromEntries((allProjects||[]).map(p => [p.id, p.description||'']));
 
     const totalBackups = projs.reduce((a, p) => a + (p.total_count||0), 0);
     const totalFailed  = projs.reduce((a, p) => a + (p.failed_count||0), 0);
@@ -592,7 +594,7 @@ async function renderDashboard() {
       ...scheds.filter(s => s.enabled && s.cron_expr).map(s => ({
         typeLabel: '🗓 專案排程', typeClass: 'badge-system',
         name: `${esc(s.project_name||'')}: ${esc(s.label||'—')}`,
-        desc: (s.target_types||[]).join('、'),
+        desc: projDescMap[s.project_id]||'',
         cron: s.cron_expr, status: s.last_run_status, errMsg: '',
         lastRun: s.last_run_at, nextRun: s.next_run_at,
       })),
