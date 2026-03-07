@@ -423,7 +423,7 @@ function renderDashFreq(key) {
     ? `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">此頻率無排程項目</td></tr>`
     : items.map(it => `<tr>
         <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
-        <td><strong>${it.name}</strong></td>
+        <td><strong>${it.name}</strong>${it.desc ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${it.desc}</div>` : ''}</td>
         <td><span class="mono" style="font-size:11px">${esc(it.cron)}</span></td>
         <td>${runStatusBadge(it.status, it.errMsg)}</td>
         <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
@@ -526,7 +526,7 @@ function renderDashFreq(key) {
     ? `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">此頻率無排程項目</td></tr>`
     : items.map(it => `<tr>
         <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
-        <td><strong>${it.name}</strong></td>
+        <td><strong>${it.name}</strong>${it.desc ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${it.desc}</div>` : ''}</td>
         <td><span class="mono" style="font-size:11px">${esc(it.cron)}</span></td>
         <td>${runStatusBadge(it.status, it.errMsg)}</td>
         <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
@@ -592,18 +592,21 @@ async function renderDashboard() {
       ...scheds.filter(s => s.enabled && s.cron_expr).map(s => ({
         typeLabel: '🗓 專案排程', typeClass: 'badge-system',
         name: `${esc(s.project_name||'')}: ${esc(s.label||'—')}`,
+        desc: (s.target_types||[]).join('、'),
         cron: s.cron_expr, status: s.last_run_status, errMsg: '',
         lastRun: s.last_run_at, nextRun: s.next_run_at,
       })),
       ...syls.filter(s => s.enabled && s.cron_expr).map(s => ({
         typeLabel: '📋 系統日誌', typeClass: 'badge-files',
         name: esc(s.name),
+        desc: [s.log_type, s.dest].filter(Boolean).join(' → '),
         cron: s.cron_expr, status: s.run_status, errMsg: s.run_message||'',
         lastRun: s.last_run_at, nextRun: null,
       })),
       ...gcpArr.filter(g => g.enabled && g.cron_expr).map(g => ({
         typeLabel: '☁️ GCP', typeClass: 'badge-database',
         name: esc(g.name),
+        desc: (g.remote_user && g.remote_host ? `${g.remote_user}@${g.remote_host}` : (g.remote_host||'')) + (g.remote_path ? `:${g.remote_path}` : ''),
         cron: g.cron_expr, status: g.run_status, errMsg: g.run_message||'',
         lastRun: g.last_run_at, nextRun: null,
       })),
