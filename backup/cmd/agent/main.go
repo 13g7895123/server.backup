@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -102,6 +103,36 @@ func main() {
 
 	// POST /gcp/test  — 接收 GcpTestRequest JSON，在 host 上執行診斷（rsync/ssh 可用性）
 	mux.HandleFunc("POST /gcp/test", auth(api.HandleGcpTestDirect))
+
+	// POST /schedules/{id}/reload  — 通知 agent scheduler 重載指定排程
+	mux.HandleFunc("POST /schedules/{id}/reload", auth(func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(r.PathValue("id"))
+		if err != nil {
+			http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+			return
+		}
+		if err := sched.Reload(context.Background(), id); err != nil {
+			log.Printf("[agent] schedule reload id=%d err=%v", id, err)
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+		log.Printf("[agent] schedule reloaded id=%d", id)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
+
+	// POST /schedules/{id}/remove  — 通知 agent scheduler 移除指定排程
+	mux.HandleFunc("POST /schedules/{id}/remove", auth(func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(r.PathValue("id"))
+		if err != nil {
+			http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+			return
+		}
+		sched.Remove(id)
+		log.Printf("[agent] schedule removed id=%d", id)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	}))
 
 	srv := &http.Server{
 		Addr:         agentAddr,

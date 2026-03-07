@@ -41,10 +41,15 @@ func main() {
 	}
 
 	sched := scheduler.New(s, runner)
-	if err := sched.Start(ctx); err != nil {
-		log.Fatalf("排程器啟動失敗: %v", err)
+
+	if agentURL := os.Getenv("AGENT_URL"); agentURL != "" {
+		log.Printf("[dashboard] 偵測到 AGENT_URL，排程由 agent 負責執行（本地排程器已停用）")
+	} else {
+		if err := sched.Start(ctx); err != nil {
+			log.Fatalf("排程器啟動失敗: %v", err)
+		}
+		defer sched.Stop()
 	}
-	defer sched.Stop()
 
 	addr := getEnvOr("DASHBOARD_ADDR", ":8080")
 	mux := http.NewServeMux()

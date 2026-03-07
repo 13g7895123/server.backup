@@ -1,27 +1,92 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
 	"backup-manager/internal/scheduler"
 	"backup-manager/internal/store"
 )
 
 type scheduleHandler struct {
-	store     *store.Store
-	scheduler *scheduler.DynamicScheduler
+	store      *store.Store
+	scheduler  *scheduler.DynamicScheduler
+	agentURL   string
+	agentToken string
 }
 
 func RegisterScheduleRoutes(mux *http.ServeMux, s *store.Store, sc *scheduler.DynamicScheduler) {
-	h := &scheduleHandler{store: s, scheduler: sc}
+	h := &scheduleHandler{
+		store:      s,
+		scheduler:  sc,
+		agentURL:   os.Getenv("AGENT_URL"),
+		agentToken: os.Getenv("AGENT_TOKEN"),
+	}
 	mux.HandleFunc("GET /api/projects/{id}/schedules", h.list)
 	mux.HandleFunc("POST /api/projects/{id}/schedules", h.create)
 	mux.HandleFunc("PUT /api/projects/{id}/schedules/{sid}", h.update)
 	mux.HandleFunc("DELETE /api/projects/{id}/schedules/{sid}", h.delete)
 	mux.HandleFunc("PATCH /api/projects/{id}/schedules/{sid}/toggle", h.toggle)
 	mux.HandleFunc("GET /api/schedules/all", h.listAll)
+}
+
+// notifyAgentReload 通知 agent 重載指定排程
+func (h *scheduleHandler) notifyAgentReload(id int) {
+	if h.agentURL == "" {
+		return
+	}
+	go func() {
+		body, _ := json.Marshal(map[string]int{"id": id})
+		req, err := http.NewRequestWithContext(context.Background(), "POST",
+			fmt.Sprintf("%s/schedules/%d/reload", h.agentURL, id), bytes.NewReader(body))
+		if err != nil {
+			log.Printf("[schedules] notifyAgentReload id=%d err=%v", id, err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if h.agentToken != "" {
+			req.Header.Set("X-Agent-Token", h.agentToken)
+		}
+		cl := &http.Client{Timeout: 5 * time.Second}
+		resp, err := cl.Do(req)
+		if err != nil {
+			log.Printf("[schedules] notifyAgentReload id=%d err=%v", id, err)
+			return
+		}
+		resp.Body.Close()
+	}()
+}
+
+// notifyAgentRemove 通知 agent 移除指定排程
+func (h *scheduleHandler) notifyAgentRemove(id int) {
+	if h.agentURL == "" {
+		return
+	}
+	go func() {
+		req, err := http.NewRequestWithContext(context.Background(), "POST",
+			fmt.Sprintf("%s/schedules/%d/remove", h.agentURL, id), nil)
+		if err != nil {
+			log.Printf("[schedules] notifyAgentRemove id=%d err=%v", id, err)
+			return
+		}
+		if h.agentToken != "" {
+			req.Header.Set("X-Agent-Token", h.agentToken)
+		}
+		cl := &http.Client{Timeout: 5 * time.Second}
+		resp, err := cl.Do(req)
+		if err != nil {
+			log.Printf("[schedules] notifyAgentRemove id=%d err=%v", id, err)
+			return
+		}
+		resp.Body.Close()
+	}()
 }
 
 func (h *scheduleHandler) list(w http.ResponseWriter, r *http.Request) {
@@ -65,12 +130,16 @@ func (h *scheduleHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 立即載入排程
-	if err := h.scheduler.Reload(r.Context(), result.ID); err != nil {
-		// 排程格式有誤，回傳 400 並刪除
-		h.store.DeleteSchedule(r.Context(), result.ID) //nolint
-		writeError(w, http.StatusBadRequest, "排程格式無效: "+err.Error())
-		return
+	// 立即載入排程（本地或 agent）
+	if h.agentURL == "" {
+		if err := h.scheduler.Reload(r.Context(), result.ID); err != nil {
+			// 排程格式有誤，回傳 400 並刪除
+			h.store.DeleteSchedule(r.Context(), result.ID) //nolint
+			writeError(w, http.StatusBadRequest, "排程格式無效: "+err.Error())
+			return
+		}
+	} else {
+		h.notifyAgentReload(result.ID)
 	}
 
 	writeJSON(w, http.StatusCreated, result)
@@ -93,7 +162,11 @@ func (h *scheduleHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 重新載入排程
-	h.scheduler.Reload(r.Context(), sid) //nolint
+	if h.agentURL == "" {
+		h.scheduler.Reload(r.Context(), sid) //nolint
+	} else {
+		h.notifyAgentReload(sid)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
@@ -103,7 +176,11 @@ func (h *scheduleHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "無效的 schedule id")
 		return
 	}
-	h.scheduler.Remove(sid)
+	if h.agentURL == "" {
+		h.scheduler.Remove(sid)
+	} else {
+		h.notifyAgentRemove(sid)
+	}
 	if err := h.store.DeleteSchedule(r.Context(), sid); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -128,7 +205,11 @@ func (h *scheduleHandler) toggle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.scheduler.Reload(r.Context(), sid) //nolint
+	if h.agentURL == "" {
+		h.scheduler.Reload(r.Context(), sid) //nolint
+	} else {
+		h.notifyAgentReload(sid)
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": body.Enabled})
 }
 
