@@ -423,7 +423,7 @@ function renderDashFreq(key) {
     ? `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">此頻率無排程項目</td></tr>`
     : items.map(it => `<tr>
         <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
-        <td><strong>${it.name}</strong>${it.desc ? `<span style="display:inline-block;margin-left:7px;padding:1px 8px;border-radius:99px;font-size:11px;font-weight:500;background:#eff6ff;color:#1d4ed8;vertical-align:middle">${it.desc}</span>` : ''}</td>
+        <td><strong>${it.name}</strong>${it.desc ? `<span style="display:inline-block;margin-left:7px;padding:2px 10px;border-radius:99px;font-size:13px;font-weight:500;background:#eff6ff;color:#1d4ed8;vertical-align:middle">${it.desc}</span>` : ''}</td>
         <td>${runStatusBadge(it.status, it.errMsg)}</td>
         <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
         <td style="font-size:12px;white-space:nowrap">${fmtDate(it.nextRun)||'—'}</td>
@@ -526,7 +526,7 @@ function renderDashFreq(key) {
     ? `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">此頻率無排程項目</td></tr>`
     : items.map(it => `<tr>
         <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
-        <td><strong>${it.name}</strong>${it.desc ? `<span style="display:inline-block;margin-left:7px;padding:1px 8px;border-radius:99px;font-size:11px;font-weight:500;background:#eff6ff;color:#1d4ed8;vertical-align:middle">${it.desc}</span>` : ''}</td>
+        <td><strong>${it.name}</strong>${it.desc ? `<span style="display:inline-block;margin-left:7px;padding:2px 10px;border-radius:99px;font-size:13px;font-weight:500;background:#eff6ff;color:#1d4ed8;vertical-align:middle">${it.desc}</span>` : ''}</td>
         <td>${runStatusBadge(it.status, it.errMsg)}</td>
         <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
         <td style="font-size:12px;white-space:nowrap">${fmtDate(it.nextRun)||'—'}</td>
@@ -593,7 +593,7 @@ async function renderDashboard() {
     const allItems = [
       ...scheds.filter(s => s.enabled && s.cron_expr).map(s => ({
         typeLabel: '🗓 專案排程', typeClass: 'badge-system',
-        name: `${esc(s.project_name||'')}: ${esc(s.label||'—')}`,
+        name: esc(s.project_name||''),
         desc: projDescMap[s.project_id]||'',
         cron: s.cron_expr, status: s.last_run_status, errMsg: '',
         lastRun: s.last_run_at, nextRun: s.next_run_at,
