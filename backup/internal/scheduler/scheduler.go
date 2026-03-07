@@ -53,10 +53,10 @@ func (ds *DynamicScheduler) Start(ctx context.Context) error {
 	}
 	ds.cron.Start()
 
-// 保留政策已停用，不自動刪除過期備份
-        // ds.cron.AddFunc("0 4 * * *", func() { //nolint
-        //      ds.runner.DeleteExpiredBackups(ctx)
-        // })
+	// 保留政策已停用，不自動刪除過期備份
+	// ds.cron.AddFunc("0 4 * * *", func() { //nolint
+	//      ds.runner.DeleteExpiredBackups(ctx)
+	// })
 
 	log.Printf("[scheduler] 已啟動，共載入 %d 個排程", len(schedules))
 	return nil
