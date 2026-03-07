@@ -1228,7 +1228,8 @@ async function submitSchedule(projId, sid = null) {
     if (sid) { await apiPut(`/api/projects/${projId}/schedules/${sid}`, body); toast('排程已更新','success'); }
     else { await apiPost(`/api/projects/${projId}/schedules`, body); toast('排程已建立','success'); }
     closeModal();
-    renderSchedulesTab(projId);
+    if (currentPage === 'schedules') renderAllSchedules();
+    else renderSchedulesTab(projId);
   } catch(e) { toast(e.message,'error'); }
 }
 
@@ -2327,31 +2328,37 @@ async function renderCapabilities() {
 /* ═══════════════════════════════════════════════════════════════
    排程管理
 ═══════════════════════════════════════════════════════════════ */
+let _mgmtSchedules = [];
+let _mgmtProjects  = [];
+
 async function renderAllSchedules() {
   setTitle('排程管理');
   loading();
   try {
-    const [projScheds, syslogs, gcps] = await Promise.all([
+    const [projScheds, projects, syslogs, gcps] = await Promise.all([
       apiGet('/api/schedules/all'),
+      apiGet('/api/projects'),
       apiGet('/api/syslogs'),
       apiGet('/api/gcpconfigs')
     ]);
-
-    const syslogsWithCron = (syslogs||[]).filter(s => s.cron_expr);
-    const gcpsWithCron    = (gcps||[]).filter(g => g.cron_expr);
+    _mgmtSchedules = projScheds || [];
+    _mgmtProjects  = projects   || [];
 
     setContent(`
       <div class="page-hdr">
-        <div class="page-hdr-left"><h1>排程管理</h1><p>統一管理專案備份、系統日誌、GCP 備份的所有排程</p></div>
+        <div class="page-hdr-left"><h1>排程管理</h1><p>統一管理所有備份排程</p></div>
       </div>
 
       <div class="sg">
-        <h2 style="font-size:15px;font-weight:700;margin-bottom:12px">📁 專案備份排程</h2>
-        ${projScheds.length === 0
-          ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無專案排程，請在專案詳細頁新增</div>'
+        <div class="flex-c" style="margin-bottom:12px">
+          <h2 style="font-size:15px;font-weight:700">📁 專案備份排程</h2>
+          <button class="btn btn-sm btn-primary ml-a" onclick="showAddScheduleForMgmt()">＋ 新增排程</button>
+        </div>
+        ${_mgmtSchedules.length === 0
+          ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無專案排程</div>'
           : `<div class="table-wrap"><table>
               <thead><tr><th>專案</th><th>標籤</th><th>Cron</th><th>備份類型</th><th>狀態</th><th>下次執行</th><th>最後執行</th><th>操作</th></tr></thead>
-              <tbody>${projScheds.map(s => `<tr>
+              <tbody>${_mgmtSchedules.map(s => `<tr>
                 <td><strong>${esc(s.project_name)}</strong></td>
                 <td>${esc(s.label||'—')}</td>
                 <td><span class="mono">${esc(s.cron_expr)}</span></td>
@@ -2360,6 +2367,7 @@ async function renderAllSchedules() {
                 <td style="font-size:12px;white-space:nowrap">${fmtDate(s.next_run_at)}</td>
                 <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at)}</td>
                 <td class="td-actions">
+                  <button class="btn btn-xs btn-secondary" onclick="showEditScheduleFromMgmt(${s.project_id},${s.id})">編輯</button>
                   <button class="btn btn-xs btn-ghost" onclick="toggleScheduleAll(${s.project_id},${s.id},${!s.enabled})">${s.enabled?'停用':'啟用'}</button>
                   <button class="btn btn-xs btn-danger" onclick="deleteScheduleAll(${s.project_id},${s.id})">刪除</button>
                 </td>
@@ -2369,19 +2377,20 @@ async function renderAllSchedules() {
 
       <div class="sg">
         <h2 style="font-size:15px;font-weight:700;margin-bottom:12px">📋 系統日誌備份排程</h2>
-        ${syslogsWithCron.length === 0
-          ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無日誌備份排程<br><span style="font-size:13px;color:var(--text2);margin-top:6px;display:block">請至「系統日誌備份」頁面設定排程</span></div>'
+        ${(!syslogs||syslogs.length===0)
+          ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無系統日誌備份設定</div>'
           : `<div class="table-wrap"><table>
-              <thead><tr><th>名稱</th><th>類型</th><th>Cron</th><th>狀態</th><th>最後執行</th><th>操作</th></tr></thead>
-              <tbody>${syslogsWithCron.map(s => `<tr>
+              <thead><tr><th>名稱</th><th>類型</th><th>排程（Cron）</th><th>啟用</th><th>最後執行</th><th>操作</th></tr></thead>
+              <tbody>${(syslogs||[]).map(s => `<tr>
                 <td><strong>${esc(s.name)}</strong></td>
                 <td><span class="badge ${s.log_type==='auth'?'badge-files':'badge-system'}">${s.log_type==='auth'?'🔐 Auth':'🖥 System'}</span></td>
-                <td><span class="mono">${esc(s.cron_expr)}</span></td>
+                <td>${s.cron_expr?`<span class="mono">${esc(s.cron_expr)}</span>`:'<span style="color:var(--text2);font-size:12px">未設定</span>'}</td>
                 <td><span class="badge ${s.enabled?'badge-on':'badge-off'}">${s.enabled?'啟用':'停用'}</span></td>
                 <td style="font-size:12px">${runStatusBadge(s.run_status,s.run_message)} ${fmtDate(s.last_run_at)}</td>
                 <td class="td-actions">
-                  <button class="btn btn-xs btn-secondary" onclick="editCronDialog('syslog',${s.id},'${esc(s.name)}','${esc(s.cron_expr)}')">修改排程</button>
-                  <button class="btn btn-xs btn-ghost" onclick="clearCronDialog('syslog',${s.id},'${esc(s.name)}')">清除</button>
+                  <button class="btn btn-xs btn-secondary" onclick="editCronDialog('syslog',${s.id},'${esc(s.name)}','${esc(s.cron_expr||'')}')">${s.cron_expr?'修改排程':'設定排程'}</button>
+                  ${s.cron_expr?`<button class="btn btn-xs btn-ghost" onclick="clearCronDialog('syslog',${s.id},'${esc(s.name)}')">清除排程</button>`:''}
+                  <button class="btn btn-xs btn-ghost" onclick="toggleSyslogSched(${s.id},${!s.enabled})">${s.enabled?'停用':'啟用'}</button>
                 </td>
               </tr>`).join('')}</tbody>
             </table></div>`}
@@ -2389,25 +2398,71 @@ async function renderAllSchedules() {
 
       <div class="sg" style="margin-bottom:30px">
         <h2 style="font-size:15px;font-weight:700;margin-bottom:12px">☁️ GCP 備份排程</h2>
-        ${gcpsWithCron.length === 0
-          ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無 GCP 備份排程</div>'
+        ${(!gcps||gcps.length===0)
+          ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無 GCP 備份設定</div>'
           : `<div class="table-wrap"><table>
-              <thead><tr><th>名稱</th><th>遠端主機</th><th>Cron</th><th>狀態</th><th>最後執行</th><th>操作</th></tr></thead>
-              <tbody>${gcpsWithCron.map(g => `<tr>
+              <thead><tr><th>名稱</th><th>遠端主機</th><th>排程（Cron）</th><th>啟用</th><th>最後執行</th><th>操作</th></tr></thead>
+              <tbody>${(gcps||[]).map(g => `<tr>
                 <td><strong>${esc(g.name)}</strong></td>
                 <td><span class="mono">${esc(g.remote_user)}@${esc(g.remote_host)}</span></td>
-                <td><span class="mono">${esc(g.cron_expr)}</span></td>
+                <td>${g.cron_expr?`<span class="mono">${esc(g.cron_expr)}</span>`:'<span style="color:var(--text2);font-size:12px">未設定</span>'}</td>
                 <td><span class="badge ${g.enabled?'badge-on':'badge-off'}">${g.enabled?'啟用':'停用'}</span></td>
                 <td style="font-size:12px">${runStatusBadge(g.run_status,g.run_message)} ${fmtDate(g.last_run_at)}</td>
                 <td class="td-actions">
-                  <button class="btn btn-xs btn-secondary" onclick="editCronDialog('gcp',${g.id},'${esc(g.name)}','${esc(g.cron_expr)}')">修改排程</button>
-                  <button class="btn btn-xs btn-ghost" onclick="clearCronDialog('gcp',${g.id},'${esc(g.name)}')">清除</button>
+                  <button class="btn btn-xs btn-secondary" onclick="editCronDialog('gcp',${g.id},'${esc(g.name)}','${esc(g.cron_expr||'')}')">${g.cron_expr?'修改排程':'設定排程'}</button>
+                  ${g.cron_expr?`<button class="btn btn-xs btn-ghost" onclick="clearCronDialog('gcp',${g.id},'${esc(g.name)}')">清除排程</button>`:''}
+                  <button class="btn btn-xs btn-ghost" onclick="toggleGcpSched(${g.id},${!g.enabled})">${g.enabled?'停用':'啟用'}</button>
                 </td>
               </tr>`).join('')}</tbody>
             </table></div>`}
       </div>
     `);
   } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
+}
+
+function showAddScheduleForMgmt() {
+  if (!_mgmtProjects.length) { toast('請先建立專案', 'warning'); return; }
+  openModal('新增專案排程', `
+    <div class="form-group">
+      <label class="form-label">選擇專案 <span style="color:var(--danger)">*</span></label>
+      <select id="f-sprojectid" class="form-input">
+        ${_mgmtProjects.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+      </select>
+    </div>` + scheduleForm(), `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitScheduleFromMgmt()">建立</button>
+  `);
+}
+
+async function submitScheduleFromMgmt() {
+  const el = document.getElementById('f-sprojectid');
+  const projId = el ? parseInt(el.value) : 0;
+  if (!projId) { toast('請選擇專案', 'warning'); return; }
+  await submitSchedule(projId);
+}
+
+function showEditScheduleFromMgmt(projId, sid) {
+  const s = _mgmtSchedules.find(x => x.id === sid) || {};
+  openModal('編輯排程', scheduleForm(s), `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitSchedule(${projId},${sid})">儲存</button>
+  `);
+}
+
+async function toggleSyslogSched(id, enabled) {
+  try {
+    await apiPatch(`/api/syslogs/${id}/toggle`, { enabled });
+    toast(enabled ? '已啟用' : '已停用', 'success');
+    renderAllSchedules();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function toggleGcpSched(id, enabled) {
+  try {
+    await apiPatch(`/api/gcpconfigs/${id}/toggle`, { enabled });
+    toast(enabled ? '已啟用' : '已停用', 'success');
+    renderAllSchedules();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 function editCronDialog(type, id, name, currentCron) {
