@@ -219,7 +219,7 @@ func (h *scheduleHandler) listAll(w http.ResponseWriter, r *http.Request) {
 	rows, err := pool.Query(r.Context(), `
 		SELECT s.id, s.project_id, p.name AS project_name, s.label, s.cron_expr,
 		       s.target_types, s.enabled, s.last_run_at, s.next_run_at,
-		       s.created_at, s.updated_at
+		       COALESCE(s.last_run_status,''), s.created_at, s.updated_at
 		FROM schedules s
 		JOIN projects p ON p.id = s.project_id
 		ORDER BY p.name, s.id`)
@@ -238,7 +238,7 @@ func (h *scheduleHandler) listAll(w http.ResponseWriter, r *http.Request) {
 		var row ScheduleRow
 		if err := rows.Scan(&row.ID, &row.ProjectID, &row.ProjectName, &row.Label, &row.CronExpr,
 			&row.TargetTypes, &row.Enabled, &row.LastRunAt, &row.NextRunAt,
-			&row.CreatedAt, &row.UpdatedAt); err != nil {
+			&row.LastRunStatus, &row.CreatedAt, &row.UpdatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

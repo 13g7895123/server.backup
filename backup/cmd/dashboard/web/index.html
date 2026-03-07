@@ -221,7 +221,11 @@ async function api(method, path, body) {
   if (body !== undefined) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
   if (r.status === 204) return null;
-  const data = await r.json();
+  const text = await r.text();
+  let data;
+  try { data = JSON.parse(text); } catch {
+    throw new Error(`伺服器回應非 JSON（HTTP ${r.status}）`);
+  }
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
 }
@@ -264,6 +268,18 @@ function fmtDur(s) {
   if (!s) return '-';
   if (s < 60) return s.toFixed(1) + 's';
   return Math.floor(s/60) + 'm ' + (s % 60).toFixed(0) + 's';
+}
+
+// 從 cron 表達式判斷備份頻率
+function cronFrequency(expr) {
+  if (!expr) return null;
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length < 5) return null;
+  const [, hour, dom, , dow] = parts;
+  if (dom !== '*' && dom !== '?') return 'monthly';
+  if (dow !== '*' && dow !== '?') return 'weekly';
+  if (hour !== '*') return 'daily';
+  return 'other';
 }
 
 function statusBadge(s, msg = '') {
@@ -351,20 +367,75 @@ async function renderDashboard() {
       apiGet('/api/gcpconfigs'),
       apiGet('/api/schedules/all'),
     ]);
-    const projs = summary.projects || [];
-    const recs  = records.records  || [];
-    const syls  = syslogs || [];
-    const gcpArr = gcps || [];
-    const scheds = projScheds || [];
+    const projs   = summary.projects || [];
+    const recs    = records.records  || [];
+    const syls    = syslogs || [];
+    const gcpArr  = gcps || [];
+    const scheds  = projScheds || [];
 
-    const totalBackups  = projs.reduce((a, p) => a + (p.total_count||0), 0);
-    const totalFailed   = projs.reduce((a, p) => a + (p.failed_count||0), 0);
-    const totalGB       = projs.reduce((a, p) => a + (p.total_size_gb||0), 0);
-    const schedEnabled  = scheds.filter(s => s.enabled).length;
-    const sylsEnabled   = syls.filter(s => s.enabled).length;
-    const sylsFailed    = syls.filter(s => s.run_status === 'failed').length;
-    const gcpsEnabled   = gcpArr.filter(g => g.enabled).length;
-    const gcpsFailed    = gcpArr.filter(g => g.run_status === 'failed').length;
+    const totalBackups = projs.reduce((a, p) => a + (p.total_count||0), 0);
+    const totalFailed  = projs.reduce((a, p) => a + (p.failed_count||0), 0);
+    const totalGB      = projs.reduce((a, p) => a + (p.total_size_gb||0), 0);
+    const schedEnabled = scheds.filter(s => s.enabled).length;
+    const sylsEnabled  = syls.filter(s => s.enabled).length;
+    const sylsFailed   = syls.filter(s => s.run_status === 'failed').length;
+    const gcpsEnabled  = gcpArr.filter(g => g.enabled).length;
+    const gcpsFailed   = gcpArr.filter(g => g.run_status === 'failed').length;
+
+    // 整合所有已啟用且有排程的備份項目
+    const allItems = [
+      ...scheds.filter(s => s.enabled && s.cron_expr).map(s => ({
+        typeLabel: '🗓 專案排程', typeClass: 'badge-system',
+        name: `${esc(s.project_name||'')}: ${esc(s.label||'—')}`,
+        cron: s.cron_expr, status: s.last_run_status, errMsg: '',
+        lastRun: s.last_run_at, nextRun: s.next_run_at,
+      })),
+      ...syls.filter(s => s.enabled && s.cron_expr).map(s => ({
+        typeLabel: '📋 系統日誌', typeClass: 'badge-files',
+        name: esc(s.name),
+        cron: s.cron_expr, status: s.run_status, errMsg: s.run_message||'',
+        lastRun: s.last_run_at, nextRun: null,
+      })),
+      ...gcpArr.filter(g => g.enabled && g.cron_expr).map(g => ({
+        typeLabel: '☁️ GCP', typeClass: 'badge-database',
+        name: esc(g.name),
+        cron: g.cron_expr, status: g.run_status, errMsg: g.run_message||'',
+        lastRun: g.last_run_at, nextRun: null,
+      })),
+    ];
+
+    const freqGroups = [
+      { key: 'daily',   label: '每日備份排程', icon: '📅' },
+      { key: 'weekly',  label: '每周備份排程', icon: '📆' },
+      { key: 'monthly', label: '每月備份排程', icon: '🗓' },
+      { key: 'other',   label: '其他排程',     icon: '⏰' },
+    ];
+
+    const freqTableRows = items => items.map(it => `
+      <tr>
+        <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
+        <td><strong>${it.name}</strong></td>
+        <td><span class="mono" style="font-size:11px">${esc(it.cron)}</span></td>
+        <td>${runStatusBadge(it.status, it.errMsg)}</td>
+        <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
+        <td style="font-size:12px;white-space:nowrap">${it.nextRun ? fmtDate(it.nextRun) : '—'}</td>
+      </tr>`).join('');
+
+    const freqSections = freqGroups.map(fg => {
+      const items = allItems.filter(it => cronFrequency(it.cron) === fg.key);
+      if (!items.length) return '';
+      return `
+        <div class="sg">
+          <div class="flex-c" style="margin-bottom:12px">
+            <h2 style="font-size:15px;font-weight:700">${fg.icon} ${fg.label}</h2>
+            <span class="badge badge-system ml-a" style="font-size:11px">${items.length} 項</span>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>類別</th><th>名稱</th><th>Cron</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
+            <tbody>${freqTableRows(items)}</tbody>
+          </table></div>
+        </div>`;
+    }).join('');
 
     setContent(`
       <div class="stat-grid">
@@ -387,6 +458,24 @@ async function renderDashboard() {
           <div class="stat-label">備份總大小</div>
           <div class="stat-value">${totalGB.toFixed(1)}</div>
           <div class="stat-sub">GB</div>
+        </div>
+      </div>
+
+      <div class="stat-grid" style="margin-top:12px">
+        <div class="stat-card c-blue">
+          <div class="stat-label">🗓 排程管理</div>
+          <div class="stat-value">${schedEnabled}</div>
+          <div class="stat-sub">共 ${scheds.length} 個，啟用 ${schedEnabled} 個</div>
+        </div>
+        <div class="stat-card ${sylsFailed>0?'c-red':'c-green'}">
+          <div class="stat-label">📋 系統日誌備份</div>
+          <div class="stat-value">${syls.length}</div>
+          <div class="stat-sub">啟用 ${sylsEnabled} 個${sylsFailed>0?`，<span style="color:var(--danger)">${sylsFailed} 個失敗</span>`:''}</div>
+        </div>
+        <div class="stat-card ${gcpsFailed>0?'c-red':'c-green'}">
+          <div class="stat-label">☁️ GCP 備份</div>
+          <div class="stat-value">${gcpArr.length}</div>
+          <div class="stat-sub">啟用 ${gcpsEnabled} 個${gcpsFailed>0?`，<span style="color:var(--danger)">${gcpsFailed} 個失敗</span>`:''}</div>
         </div>
       </div>
 
@@ -431,61 +520,11 @@ async function renderDashboard() {
           </div>`).join('')}</div>`}
       </div>
 
-      <div class="sg">
-        <div class="flex-c" style="margin-bottom:12px">
-          <h2 style="font-size:15px;font-weight:700">🗓 排程執行狀態</h2>
-          <button class="btn btn-sm btn-secondary ml-a" onclick="navigate('schedules')">管理排程</button>
+      ${allItems.length === 0 ? `
+        <div class="sg">
+          <div class="empty" style="padding:16px"><div class="empty-icon">⏰</div>目前沒有啟用中且有排程的備份設定</div>
         </div>
-        ${scheds.length === 0 ? '<div class="empty" style="padding:16px"><div class="empty-icon">🕐</div>尚無專案排程</div>' : `
-        <div class="table-wrap"><table>
-          <thead><tr><th>專案</th><th>標籤</th><th>Cron</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
-          <tbody>${scheds.map(s => `<tr>
-            <td><strong>${esc(s.project_name||'')}</strong></td>
-            <td>${esc(s.label||'—')}</td>
-            <td><span class="mono">${esc(s.cron_expr)}</span></td>
-            <td>${runStatusBadge(s.last_run_status)}</td>
-            <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at)}</td>
-            <td style="font-size:12px;white-space:nowrap">${fmtDate(s.next_run_at)}</td>
-          </tr>`).join('')}</tbody>
-        </table></div>`}
-      </div>
-
-      <div class="sg">
-        <div class="flex-c" style="margin-bottom:12px">
-          <h2 style="font-size:15px;font-weight:700">📋 系統日誌備份狀態</h2>
-          <button class="btn btn-sm btn-secondary ml-a" onclick="navigate('syslogs')">管理日誌備份</button>
-        </div>
-        ${syls.length === 0 ? '<div class="empty" style="padding:16px"><div class="empty-icon">📋</div>尚無系統日誌備份設定</div>' : `
-        <div class="table-wrap"><table>
-          <thead><tr><th>名稱</th><th>類型</th><th>排程</th><th>啟用</th><th>上次執行結果</th><th>最後執行</th></tr></thead>
-          <tbody>${syls.map(s => `<tr>
-            <td><strong>${esc(s.name)}</strong></td>
-            <td><span class="badge ${s.log_type==='auth'?'badge-files':'badge-system'}">${s.log_type==='auth'?'🔐 Auth':'🖥 System'}</span></td>
-            <td>${s.cron_expr?`<span class="mono" style="font-size:11px">${esc(s.cron_expr)}</span>`:'<span style="color:var(--text2);font-size:11px">未設定</span>'}</td>
-            <td><span class="badge ${s.enabled?'badge-on':'badge-off'}">${s.enabled?'啟用':'停用'}</span></td>
-            <td style="font-size:12px">${runStatusBadge(s.run_status, s.run_message)}</td>
-            <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at)||'—'}</td>
-          </tr>`).join('')}</tbody>
-        </table></div>`}
-      </div>
-
-      <div class="sg">
-        <div class="flex-c" style="margin-bottom:12px">
-          <h2 style="font-size:15px;font-weight:700">☁️ GCP 備份狀態</h2>
-          <button class="btn btn-sm btn-secondary ml-a" onclick="navigate('gcpbackup')">管理 GCP 備份</button>
-        </div>
-        ${gcpArr.length === 0 ? '<div class="empty" style="padding:16px"><div class="empty-icon">☁️</div>尚無 GCP 備份設定</div>' : `
-        <div class="table-wrap"><table>
-          <thead><tr><th>名稱</th><th>遠端主機</th><th>排程</th><th>啟用</th><th>上次執行結果</th><th>最後執行</th></tr></thead>
-          <tbody>${gcpArr.map(g => `<tr>
-            <td><strong>${esc(g.name)}</strong></td>
-            <td><span class="mono" style="font-size:11px">${esc(g.remote_user)}@${esc(g.remote_host)}</span></td>
-            <td>${g.cron_expr?`<span class="mono" style="font-size:11px">${esc(g.cron_expr)}</span>`:'<span style="color:var(--text2);font-size:11px">未設定</span>'}</td>
-            <td><span class="badge ${g.enabled?'badge-on':'badge-off'}">${g.enabled?'啟用':'停用'}</span></td>
-            <td style="font-size:12px">${runStatusBadge(g.run_status, g.run_message)}</td>
-            <td style="font-size:12px;white-space:nowrap">${fmtDate(g.last_run_at)||'—'}</td>
-          </tr>`).join('')}</tbody>
-        </table></div>`}
+      ` : freqSections}
       </div>
 
       <div class="sg">
