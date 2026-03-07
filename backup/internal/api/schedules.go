@@ -30,6 +30,7 @@ func RegisterScheduleRoutes(mux *http.ServeMux, s *store.Store, sc *scheduler.Dy
 		agentToken: os.Getenv("AGENT_TOKEN"),
 	}
 	mux.HandleFunc("GET /api/projects/{id}/schedules", h.list)
+	mux.HandleFunc("GET /api/projects/{id}/schedules/{sid}", h.get)
 	mux.HandleFunc("POST /api/projects/{id}/schedules", h.create)
 	mux.HandleFunc("PUT /api/projects/{id}/schedules/{sid}", h.update)
 	mux.HandleFunc("DELETE /api/projects/{id}/schedules/{sid}", h.delete)
@@ -143,6 +144,20 @@ func (h *scheduleHandler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *scheduleHandler) get(w http.ResponseWriter, r *http.Request) {
+	sid, err := strconv.Atoi(r.PathValue("sid"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 schedule id")
+		return
+	}
+	sch, err := h.store.GetSchedule(r.Context(), sid)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "找不到排程")
+		return
+	}
+	writeJSON(w, http.StatusOK, sch)
 }
 
 func (h *scheduleHandler) update(w http.ResponseWriter, r *http.Request) {

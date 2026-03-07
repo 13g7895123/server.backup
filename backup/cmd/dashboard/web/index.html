@@ -617,8 +617,8 @@ async function renderDashboard() {
       { key: 'monthly', label: '🗓 每月' },
       { key: 'other',   label: '⏰ 其他' },
     ];
-    const activeTabs = freqTabDefs.filter(t => allItems.some(it => cronFrequency(it.cron) === t.key));
-    const defaultTab = activeTabs.length ? activeTabs[0].key : 'daily';
+    const activeTabs = freqTabDefs; // 固定顯示全部 4 個 tab
+    const defaultTab = 'daily';
     const recentRecs = allRecs.slice(0, 8);
 
     setContent(`
@@ -1201,7 +1201,6 @@ async function renderProjectDetail(id) {
       <div class="tabs" id="proj-tabs">
         <div class="tab ${currentTab==='targets'?'active':''}" onclick="switchTab('targets')">備份目標</div>
         <div class="tab ${currentTab==='schedules'?'active':''}" onclick="switchTab('schedules')">排程</div>
-        <div class="tab ${currentTab==='retention'?'active':''}" onclick="switchTab('retention')">保留政策</div>
         <div class="tab ${currentTab==='records'?'active':''}" onclick="switchTab('records')">備份紀錄</div>
       </div>
       <div id="tab-content"></div>
@@ -1213,10 +1212,10 @@ async function renderProjectDetail(id) {
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('#proj-tabs .tab').forEach((el, i) => {
-    el.classList.toggle('active', el.textContent === { targets:'備份目標', schedules:'排程', retention:'保留政策', records:'備份紀錄' }[tab]);
+    el.classList.toggle('active', el.textContent === { targets:'備份目標', schedules:'排程', records:'備份紀錄' }[tab]);
   });
   document.querySelectorAll('#proj-tabs .tab').forEach(el => {
-    const map = { '備份目標':'targets','排程':'schedules','保留政策':'retention','備份紀錄':'records' };
+    const map = { '備份目標':'targets','排程':'schedules','備份紀錄':'records' };
     el.classList.toggle('active', map[el.textContent] === tab);
   });
   loadTab(currentProjectId, tab);
