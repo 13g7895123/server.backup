@@ -909,7 +909,19 @@ func (h *gcpHandler) run(w http.ResponseWriter, r *http.Request) {
 		`UPDATE gcp_configs SET run_status='running', run_message='', updated_at=NOW() WHERE id=$1`, id)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered", "message": "GCP 備份已開始（rsync）"})
 	go func() {
-		msg, runErr := executeGcpBackup(r.Context(), h.pool, c)
+		var msg string
+		var runErr error
+		if agentURL := os.Getenv("AGENT_URL"); agentURL != "" {
+			tasks, terr := resolveGcpRsyncTasks(context.Background(), h.pool, c)
+			if terr != nil {
+				runErr = terr
+			} else {
+				runReq := GcpRunRequest{SshKey: c.SshKey, RemoteUser: c.RemoteUser, RemoteHost: c.RemoteHost, Tasks: tasks}
+				msg, runErr = proxyGcpRun(agentURL, runReq)
+			}
+		} else {
+			msg, runErr = executeGcpBackup(context.Background(), h.pool, c)
+		}
 		status := "success"
 		if runErr != nil {
 			status = "failed"
@@ -930,6 +942,221 @@ type gcpProjectInfo struct {
 	ID      int
 	Name    string
 	NasBase string
+}
+
+// ── GCP Agent proxy 類型 & helpers ────────────────────────────────────────────
+
+// GcpRsyncTask 單一 rsync 同步任務
+type GcpRsyncTask struct {
+	Src string `json:"src"` // 本地來源目錄（NAS 挂載路徑）
+	Dst string `json:"dst"` // 遠端目標（user@host:path）
+	Tag string `json:"tag"` // 描述標籤（日誌用）
+}
+
+// GcpRunRequest dashboard 傳給 agent 的備份執行請求
+type GcpRunRequest struct {
+	SshKey     string         `json:"ssh_key"`
+	RemoteUser string         `json:"remote_user"`
+	RemoteHost string         `json:"remote_host"`
+	Tasks      []GcpRsyncTask `json:"tasks"`
+}
+
+// GcpTestRequest dashboard 傳給 agent 的診斷請求
+type GcpTestRequest struct {
+	RemoteUser string   `json:"remote_user"`
+	RemoteHost string   `json:"remote_host"`
+	SshKey     string   `json:"ssh_key"`
+	LocalDirs  []string `json:"local_dirs"` // 需要在 host 上存在的目錄
+}
+
+// resolveGcpRsyncTasks 在 dashboard 端（有 DB）解析 rsync 任務清單，供傳給 agent 執行
+func resolveGcpRsyncTasks(ctx context.Context, pool *pgxpool.Pool, c GcpConfig) ([]GcpRsyncTask, error) {
+	date := time.Now().Format("2006-01-02")
+	var tasks []GcpRsyncTask
+	if len(c.ProjectIDs) > 0 {
+		rows, err := pool.Query(ctx,
+			`SELECT id, name, nas_base FROM projects WHERE id = ANY($1) AND enabled = true ORDER BY id`,
+			c.ProjectIDs)
+		if err != nil {
+			return nil, fmt.Errorf("查詢專案失敗: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p gcpProjectInfo
+			if err := rows.Scan(&p.ID, &p.Name, &p.NasBase); err != nil {
+				return nil, err
+			}
+			if p.NasBase == "" {
+				continue
+			}
+			tasks = append(tasks, GcpRsyncTask{
+				Src: p.NasBase + "/" + date + "/",
+				Dst: fmt.Sprintf("%s@%s:%s/%s/%s", c.RemoteUser, c.RemoteHost, c.RemotePath, p.Name, date),
+				Tag: p.Name,
+			})
+		}
+	} else {
+		tasks = append(tasks,
+			GcpRsyncTask{
+				Src: c.BackupDir + "/" + date + "/",
+				Dst: fmt.Sprintf("%s@%s:%s/%s", c.RemoteUser, c.RemoteHost, c.RemotePath, date),
+				Tag: "files",
+			},
+			GcpRsyncTask{
+				Src: c.BackupDbDir + "/" + date + "/",
+				Dst: fmt.Sprintf("%s@%s:%s/%s", c.RemoteUser, c.RemoteHost, c.RemoteDbPath, date),
+				Tag: "db",
+			},
+		)
+	}
+	return tasks, nil
+}
+
+// proxyGcpRun 將備份執行委派給 agent（agent 在 host 有 rsync/ssh）
+func proxyGcpRun(agentURL string, req GcpRunRequest) (string, error) {
+	body, _ := json.Marshal(req)
+	agentToken := os.Getenv("AGENT_TOKEN")
+	httpReq, err := http.NewRequest("POST", agentURL+"/gcp/run", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("建立 agent 請求失敗: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if agentToken != "" {
+		httpReq.Header.Set("X-Agent-Token", agentToken)
+	}
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("無法連線 agent: %w", err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		OK  bool   `json:"ok"`
+		Msg string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("agent 回應解析失敗: %w", err)
+	}
+	if !result.OK {
+		return "", fmt.Errorf("%s", result.Msg)
+	}
+	return result.Msg, nil
+}
+
+// proxyGcpTest 將診斷測試委派給 agent 執行
+func proxyGcpTest(agentURL string, req GcpTestRequest) ([]testCheck, bool, error) {
+	body, _ := json.Marshal(req)
+	agentToken := os.Getenv("AGENT_TOKEN")
+	httpReq, err := http.NewRequest("POST", agentURL+"/gcp/test", bytes.NewReader(body))
+	if err != nil {
+		return nil, false, fmt.Errorf("建立 agent 請求失敗: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if agentToken != "" {
+		httpReq.Header.Set("X-Agent-Token", agentToken)
+	}
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, false, fmt.Errorf("無法連線 agent: %w", err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		OK     bool        `json:"ok"`
+		Checks []testCheck `json:"checks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, false, fmt.Errorf("agent 回應解析失敗: %w", err)
+	}
+	return result.Checks, result.OK, nil
+}
+
+// HandleGcpRunDirect 供 agent POST /gcp/run 使用（在 host 上執行 rsync）
+func HandleGcpRunDirect(w http.ResponseWriter, r *http.Request) {
+	var req GcpRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	sshOpt := fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=no", req.SshKey)
+	var synced []string
+	for _, task := range req.Tasks {
+		cmd := exec.Command("rsync", "-avz", "-e", sshOpt, task.Src, task.Dst) //nolint:gosec
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":  false,
+				"msg": fmt.Sprintf("[%s] rsync 失敗: %v\n%s", task.Tag, err, string(out)),
+			})
+			return
+		}
+		synced = append(synced, task.Tag)
+		log.Printf("[gcp-agent] rsync 完成: %s → %s", task.Src, task.Dst)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":  true,
+		"msg": fmt.Sprintf("rsync 完成 %d 個任務 (%s)", len(synced), strings.Join(synced, ", ")),
+	})
+}
+
+// HandleGcpTestDirect 供 agent POST /gcp/test 使用（在 host 上執行診斷）
+func HandleGcpTestDirect(w http.ResponseWriter, r *http.Request) {
+	var req GcpTestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	var checks []testCheck
+	allOK := true
+
+	// 檢查 SSH Key 檔案
+	if _, e := os.Stat(req.SshKey); e != nil {
+		checks = append(checks, testCheck{"SSH Key 存在", false, e.Error()})
+		allOK = false
+	} else {
+		checks = append(checks, testCheck{"SSH Key 存在", true, req.SshKey})
+	}
+
+	// 檢查 rsync 可用
+	out, e := exec.Command("rsync", "--version").Output() //nolint:gosec
+	if e != nil {
+		checks = append(checks, testCheck{"rsync 可用", false, e.Error()})
+		allOK = false
+	} else {
+		ver := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
+		checks = append(checks, testCheck{"rsync 可用", true, ver})
+	}
+
+	// 測試 SSH 連線
+	sshOut, sshErr := exec.Command("ssh", //nolint:gosec
+		"-i", req.SshKey,
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=8",
+		"-o", "StrictHostKeyChecking=no",
+		req.RemoteUser+"@"+req.RemoteHost, "echo ok").CombinedOutput()
+	if sshErr != nil {
+		detail := strings.TrimSpace(string(sshOut))
+		if detail == "" {
+			detail = sshErr.Error()
+		}
+		checks = append(checks, testCheck{fmt.Sprintf("SSH %s@%s", req.RemoteUser, req.RemoteHost), false, detail})
+		allOK = false
+	} else {
+		checks = append(checks, testCheck{fmt.Sprintf("SSH %s@%s", req.RemoteUser, req.RemoteHost), true, "連線成功"})
+	}
+
+	// 檢查提供的本地目錄
+	for _, dir := range req.LocalDirs {
+		if dir == "" {
+			continue
+		}
+		if _, e := os.Stat(dir); e != nil {
+			checks = append(checks, testCheck{"本地目錄：" + dir, false, e.Error()})
+			allOK = false
+		} else {
+			checks = append(checks, testCheck{"本地目錄：" + dir, true, "存在"})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": allOK, "checks": checks})
 }
 
 // test 執行 GCP 備份前的預檢診斷
@@ -957,6 +1184,44 @@ func (h *gcpHandler) test(w http.ResponseWriter, r *http.Request) {
 		c.ProjectIDs = []int{}
 	}
 
+	// 若有 AGENT_URL → 解析本地目錄後委派給 agent（agent 在 host 有 rsync/ssh）
+	if agentURL := os.Getenv("AGENT_URL"); agentURL != "" {
+		var localDirs []string
+		if len(c.ProjectIDs) > 0 {
+			prows, qErr := h.pool.Query(r.Context(),
+				`SELECT nas_base FROM projects WHERE id = ANY($1)`, c.ProjectIDs)
+			if qErr == nil {
+				defer prows.Close()
+				for prows.Next() {
+					var nasBase string
+					prows.Scan(&nasBase) //nolint
+					if nasBase != "" {
+						localDirs = append(localDirs, nasBase)
+					}
+				}
+			}
+		} else if c.BackupDir != "" {
+			localDirs = append(localDirs, c.BackupDir)
+		}
+		testReq := GcpTestRequest{
+			RemoteUser: c.RemoteUser,
+			RemoteHost: c.RemoteHost,
+			SshKey:     c.SshKey,
+			LocalDirs:  localDirs,
+		}
+		checks, allOK, proxyErr := proxyGcpTest(agentURL, testReq)
+		if proxyErr != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":     false,
+				"checks": []testCheck{{"\u9023\u7dda agent", false, proxyErr.Error()}},
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": allOK, "checks": checks})
+		return
+	}
+
+	// fallback：本地執行（無 AGENT_URL 的環境）
 	var checks []testCheck
 	allOK := true
 

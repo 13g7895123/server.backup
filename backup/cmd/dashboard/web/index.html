@@ -181,9 +181,7 @@ select.form-input{width:auto}
       <div class="nav-section">系統備份</div>
       <div class="nav-item" data-p="syslogs"><span class="ni">📋</span>系統日誌備份</div>
       <div class="nav-item" data-p="gcpbackup"><span class="ni">☁️</span>GCP 備份</div>
-      <div class="nav-item" data-p="integrated"><span class="ni">🔄</span>整合備份</div>
-      <div class="nav-section">安全稽核</div>
-      <div class="nav-item" data-p="ssh-audit"><span class="ni">🔐</span>SSH 登入稽核</div>
+      <div class="nav-item" data-p="schedules"><span class="ni">🗓</span>排程管理</div>
       <div class="nav-section">系統</div>
       <div class="nav-item" data-p="capabilities"><span class="ni">⚙️</span>系統功能</div>
     </nav>
@@ -2327,6 +2325,143 @@ async function renderCapabilities() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   排程管理
+═══════════════════════════════════════════════════════════════ */
+async function renderAllSchedules() {
+  setTitle('排程管理');
+  loading();
+  try {
+    const [projScheds, syslogs, gcps] = await Promise.all([
+      apiGet('/api/schedules/all'),
+      apiGet('/api/syslogs'),
+      apiGet('/api/gcpconfigs')
+    ]);
+
+    const syslogsWithCron = (syslogs||[]).filter(s => s.cron_expr);
+    const gcpsWithCron    = (gcps||[]).filter(g => g.cron_expr);
+
+    setContent(`
+      <div class="page-hdr">
+        <div class="page-hdr-left"><h1>排程管理</h1><p>統一管理專案備份、系統日誌、GCP 備份的所有排程</p></div>
+      </div>
+
+      <div class="sg">
+        <h2 style="font-size:15px;font-weight:700;margin-bottom:12px">📁 專案備份排程</h2>
+        ${projScheds.length === 0
+          ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無專案排程，請在專案詳細頁新增</div>'
+          : `<div class="table-wrap"><table>
+              <thead><tr><th>專案</th><th>標籤</th><th>Cron</th><th>備份類型</th><th>狀態</th><th>下次執行</th><th>最後執行</th><th>操作</th></tr></thead>
+              <tbody>${projScheds.map(s => `<tr>
+                <td><strong>${esc(s.project_name)}</strong></td>
+                <td>${esc(s.label||'—')}</td>
+                <td><span class="mono">${esc(s.cron_expr)}</span></td>
+                <td>${(s.target_types||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
+                <td><span class="badge ${s.enabled?'badge-on':'badge-off'}">${s.enabled?'啟用':'停用'}</span></td>
+                <td style="font-size:12px;white-space:nowrap">${fmtDate(s.next_run_at)}</td>
+                <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at)}</td>
+                <td class="td-actions">
+                  <button class="btn btn-xs btn-ghost" onclick="toggleScheduleAll(${s.project_id},${s.id},${!s.enabled})">${s.enabled?'停用':'啟用'}</button>
+                  <button class="btn btn-xs btn-danger" onclick="deleteScheduleAll(${s.project_id},${s.id})">刪除</button>
+                </td>
+              </tr>`).join('')}</tbody>
+            </table></div>`}
+      </div>
+
+      <div class="sg">
+        <h2 style="font-size:15px;font-weight:700;margin-bottom:12px">📋 系統日誌備份排程</h2>
+        ${syslogsWithCron.length === 0
+          ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無日誌備份排程<br><span style="font-size:13px;color:var(--text2);margin-top:6px;display:block">請至「系統日誌備份」頁面設定排程</span></div>'
+          : `<div class="table-wrap"><table>
+              <thead><tr><th>名稱</th><th>類型</th><th>Cron</th><th>狀態</th><th>最後執行</th><th>操作</th></tr></thead>
+              <tbody>${syslogsWithCron.map(s => `<tr>
+                <td><strong>${esc(s.name)}</strong></td>
+                <td><span class="badge ${s.log_type==='auth'?'badge-files':'badge-system'}">${s.log_type==='auth'?'🔐 Auth':'🖥 System'}</span></td>
+                <td><span class="mono">${esc(s.cron_expr)}</span></td>
+                <td><span class="badge ${s.enabled?'badge-on':'badge-off'}">${s.enabled?'啟用':'停用'}</span></td>
+                <td style="font-size:12px">${runStatusBadge(s.run_status,s.run_message)} ${fmtDate(s.last_run_at)}</td>
+                <td class="td-actions">
+                  <button class="btn btn-xs btn-secondary" onclick="editCronDialog('syslog',${s.id},'${esc(s.name)}','${esc(s.cron_expr)}')">修改排程</button>
+                  <button class="btn btn-xs btn-ghost" onclick="clearCronDialog('syslog',${s.id},'${esc(s.name)}')">清除</button>
+                </td>
+              </tr>`).join('')}</tbody>
+            </table></div>`}
+      </div>
+
+      <div class="sg" style="margin-bottom:30px">
+        <h2 style="font-size:15px;font-weight:700;margin-bottom:12px">☁️ GCP 備份排程</h2>
+        ${gcpsWithCron.length === 0
+          ? '<div class="empty" style="padding:20px"><div class="empty-icon">🕐</div>尚無 GCP 備份排程</div>'
+          : `<div class="table-wrap"><table>
+              <thead><tr><th>名稱</th><th>遠端主機</th><th>Cron</th><th>狀態</th><th>最後執行</th><th>操作</th></tr></thead>
+              <tbody>${gcpsWithCron.map(g => `<tr>
+                <td><strong>${esc(g.name)}</strong></td>
+                <td><span class="mono">${esc(g.remote_user)}@${esc(g.remote_host)}</span></td>
+                <td><span class="mono">${esc(g.cron_expr)}</span></td>
+                <td><span class="badge ${g.enabled?'badge-on':'badge-off'}">${g.enabled?'啟用':'停用'}</span></td>
+                <td style="font-size:12px">${runStatusBadge(g.run_status,g.run_message)} ${fmtDate(g.last_run_at)}</td>
+                <td class="td-actions">
+                  <button class="btn btn-xs btn-secondary" onclick="editCronDialog('gcp',${g.id},'${esc(g.name)}','${esc(g.cron_expr)}')">修改排程</button>
+                  <button class="btn btn-xs btn-ghost" onclick="clearCronDialog('gcp',${g.id},'${esc(g.name)}')">清除</button>
+                </td>
+              </tr>`).join('')}</tbody>
+            </table></div>`}
+      </div>
+    `);
+  } catch(e) { setContent(`<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`); }
+}
+
+function editCronDialog(type, id, name, currentCron) {
+  openModal(`排程設定：${name}`, `
+    <div class="form-group">
+      <label class="form-label">Cron 表達式</label>
+      <input id="cron-expr-input" class="form-input" value="${esc(currentCron)}" placeholder="0 2 * * *">
+      <div class="form-hint">格式：分 時 日 月 星期　範例：<code>0 2 * * *</code> = 每天凌晨 2:00</div>
+    </div>`, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="saveCronDialog('${type}',${id})">儲存</button>
+  `);
+}
+
+async function saveCronDialog(type, id) {
+  const cron = document.getElementById('cron-expr-input')?.value.trim();
+  if (!cron) { toast('請填寫 cron 表達式', 'warning'); return; }
+  try {
+    const url = type === 'syslog' ? `/api/syslogs/${id}/schedule` : `/api/gcpconfigs/${id}/schedule`;
+    await apiPatch(url, { cron_expr: cron });
+    toast('排程已更新', 'success');
+    closeModal();
+    renderAllSchedules();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function clearCronDialog(type, id, name) {
+  if (!confirm(`確定要清除「${name}」的排程嗎？`)) return;
+  try {
+    const url = type === 'syslog' ? `/api/syslogs/${id}/schedule` : `/api/gcpconfigs/${id}/schedule`;
+    await apiPatch(url, { cron_expr: '' });
+    toast('排程已清除', 'success');
+    renderAllSchedules();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function toggleScheduleAll(projId, sid, enabled) {
+  try {
+    await apiPatch(`/api/projects/${projId}/schedules/${sid}/toggle`, { enabled });
+    toast(enabled ? '已啟用' : '已停用', 'success');
+    renderAllSchedules();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteScheduleAll(projId, sid) {
+  if (!confirm('確定刪除此排程？')) return;
+  try {
+    await apiDelete(`/api/projects/${projId}/schedules/${sid}`);
+    toast('已刪除', 'success');
+    renderAllSchedules();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
    Init
 ═══════════════════════════════════════════════════════════════ */
 function renderPage() {
@@ -2336,9 +2471,8 @@ function renderPage() {
   else if (currentPage === 'backups')  renderBackups();
   else if (currentPage === 'syslogs')  renderSyslogs();
   else if (currentPage === 'gcpbackup') renderGcpBackup();
-  else if (currentPage === 'integrated') renderIntegratedBackup();
+  else if (currentPage === 'schedules') renderAllSchedules();
   else if (currentPage === 'capabilities') renderCapabilities();
-  else if (currentPage === 'ssh-audit')    renderSshAudit();
   else renderDashboard();
 }
 

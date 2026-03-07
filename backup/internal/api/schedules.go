@@ -21,6 +21,7 @@ func RegisterScheduleRoutes(mux *http.ServeMux, s *store.Store, sc *scheduler.Dy
 	mux.HandleFunc("PUT /api/projects/{id}/schedules/{sid}", h.update)
 	mux.HandleFunc("DELETE /api/projects/{id}/schedules/{sid}", h.delete)
 	mux.HandleFunc("PATCH /api/projects/{id}/schedules/{sid}/toggle", h.toggle)
+	mux.HandleFunc("GET /api/schedules/all", h.listAll)
 }
 
 func (h *scheduleHandler) list(w http.ResponseWriter, r *http.Request) {
@@ -129,4 +130,41 @@ func (h *scheduleHandler) toggle(w http.ResponseWriter, r *http.Request) {
 	}
 	h.scheduler.Reload(r.Context(), sid) //nolint
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": body.Enabled})
+}
+
+// listAll 回傳所有排程（跨所有專案），包含所屬專案名稱
+func (h *scheduleHandler) listAll(w http.ResponseWriter, r *http.Request) {
+	pool := h.store.Pool()
+	rows, err := pool.Query(r.Context(), `
+		SELECT s.id, s.project_id, p.name AS project_name, s.label, s.cron_expr,
+		       s.target_types, s.enabled, s.last_run_at, s.next_run_at,
+		       s.created_at, s.updated_at
+		FROM schedules s
+		JOIN projects p ON p.id = s.project_id
+		ORDER BY p.name, s.id`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	type ScheduleRow struct {
+		store.Schedule
+		ProjectName string `json:"project_name"`
+	}
+	var result []ScheduleRow
+	for rows.Next() {
+		var row ScheduleRow
+		if err := rows.Scan(&row.ID, &row.ProjectID, &row.ProjectName, &row.Label, &row.CronExpr,
+			&row.TargetTypes, &row.Enabled, &row.LastRunAt, &row.NextRunAt,
+			&row.CreatedAt, &row.UpdatedAt); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		result = append(result, row)
+	}
+	if result == nil {
+		result = []ScheduleRow{}
+	}
+	writeJSON(w, http.StatusOK, result)
 }

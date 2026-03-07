@@ -6,6 +6,9 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
+echo "[deploy-agent] 編譯 backup-agent ..."
+bash scripts/build-agent.sh
+
 echo "[deploy-agent] 停止 backup-agent 服務..."
 sudo systemctl stop backup-agent
 

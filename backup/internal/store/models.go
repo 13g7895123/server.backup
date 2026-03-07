@@ -493,6 +493,7 @@ func (s *Store) Summary(ctx context.Context) ([]ProjectSummary, error) {
 		  (SELECT status FROM backup_records r2
 		   WHERE r2.project_id = r.project_id ORDER BY created_at DESC LIMIT 1)
 		FROM backup_records r
+		WHERE project_id IS NOT NULL
 		GROUP BY project_id, project_name
 		ORDER BY project_name`)
 	if err != nil {

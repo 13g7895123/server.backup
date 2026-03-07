@@ -97,6 +97,12 @@ func main() {
 	// POST /syslogs/test  — 接收 SyslogConfig JSON，在 host 上執行備份前診斷
 	mux.HandleFunc("POST /syslogs/test", auth(api.HandleSyslogTestDirect))
 
+	// POST /gcp/run  — 接收 GcpRunRequest JSON，在 host 上執行 rsync 備份
+	mux.HandleFunc("POST /gcp/run", auth(api.HandleGcpRunDirect))
+
+	// POST /gcp/test  — 接收 GcpTestRequest JSON，在 host 上執行診斷（rsync/ssh 可用性）
+	mux.HandleFunc("POST /gcp/test", auth(api.HandleGcpTestDirect))
+
 	srv := &http.Server{
 		Addr:         agentAddr,
 		Handler:      mux,
