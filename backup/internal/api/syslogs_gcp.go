@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -308,7 +309,19 @@ func (h *syslogHandler) run(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered", "message": "日誌備份已開始"})
 	go func() {
-		msg, runErr := executeSyslogBackup(c)
+		var msg string
+		var runErr error
+
+		// journal 類型且有 AGENT_URL → 委派給 agent（agent 在 host 有 journalctl）
+		if c.SourceType == "journal" {
+			if agentURL := os.Getenv("AGENT_URL"); agentURL != "" {
+				msg, runErr = proxySyslogRun(agentURL, c)
+			} else {
+				msg, runErr = executeSyslogBackup(c)
+			}
+		} else {
+			msg, runErr = executeSyslogBackup(c)
+		}
 		status := "success"
 		errStr := ""
 		if runErr != nil {
@@ -430,6 +443,87 @@ func (h *syslogHandler) test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// journal 類型且有 AGENT_URL → 委派給 agent（agent 在 host 有 journalctl）
+	if c.SourceType == "journal" {
+		if agentURL := os.Getenv("AGENT_URL"); agentURL != "" {
+			checks, allOK, proxyErr := proxySyslogTest(agentURL, c)
+			if proxyErr != nil {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"ok": false,
+					"checks": []testCheck{{"連線 agent", false, proxyErr.Error()}},
+				})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": allOK, "checks": checks})
+			return
+		}
+	}
+
+	checks, allOK := runSyslogTestChecks(c)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": allOK, "checks": checks})
+}
+
+// ── Agent proxy helpers ───────────────────────────────────────────────────────
+
+// proxySyslogRun 將 journal 備份委派給 agent 執行（agent 在 host 上有 journalctl）
+func proxySyslogRun(agentURL string, c SyslogConfig) (string, error) {
+	body, _ := json.Marshal(c)
+	agentToken := os.Getenv("AGENT_TOKEN")
+	req, err := http.NewRequest("POST", agentURL+"/syslogs/run", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("建立 agent 請求失敗: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if agentToken != "" {
+		req.Header.Set("X-Agent-Token", agentToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("無法連線 agent: %w", err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		OK  bool   `json:"ok"`
+		Msg string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("agent 回應解析失敗: %w", err)
+	}
+	if !result.OK {
+		return "", fmt.Errorf("%s", result.Msg)
+	}
+	return result.Msg, nil
+}
+
+// proxySyslogTest 將 journal 診斷測試委派給 agent 執行
+func proxySyslogTest(agentURL string, c SyslogConfig) ([]testCheck, bool, error) {
+	body, _ := json.Marshal(c)
+	agentToken := os.Getenv("AGENT_TOKEN")
+	req, err := http.NewRequest("POST", agentURL+"/syslogs/test", bytes.NewReader(body))
+	if err != nil {
+		return nil, false, fmt.Errorf("建立 agent 請求失敗: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if agentToken != "" {
+		req.Header.Set("X-Agent-Token", agentToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, false, fmt.Errorf("無法連線 agent: %w", err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		OK     bool        `json:"ok"`
+		Checks []testCheck `json:"checks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, false, fmt.Errorf("agent 回應解析失敗: %w", err)
+	}
+	return result.Checks, result.OK, nil
+}
+
+// runSyslogTestChecks 執行 syslog 備份前診斷（可在 agent 端或 dashboard 端執行）
+func runSyslogTestChecks(c SyslogConfig) ([]testCheck, bool) {
 	var checks []testCheck
 	allOK := true
 
@@ -486,6 +580,32 @@ func (h *syslogHandler) test(w http.ResponseWriter, r *http.Request) {
 		checks = append(checks, testCheck{"目的地目錄", true, c.Dest})
 	}
 
+	return checks, allOK
+}
+
+// HandleSyslogRunDirect 供 agent POST /syslogs/run 路由使用（在 host 上執行備份）
+func HandleSyslogRunDirect(w http.ResponseWriter, r *http.Request) {
+	var c SyslogConfig
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	msg, err := executeSyslogBackup(c)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "msg": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "msg": msg})
+}
+
+// HandleSyslogTestDirect 供 agent POST /syslogs/test 路由使用（在 host 上執行診斷）
+func HandleSyslogTestDirect(w http.ResponseWriter, r *http.Request) {
+	var c SyslogConfig
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+	checks, allOK := runSyslogTestChecks(c)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": allOK, "checks": checks})
 }
 
