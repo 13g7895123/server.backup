@@ -423,10 +423,10 @@ function renderDashFreq(key) {
     ? `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">此頻率無排程項目</td></tr>`
     : items.map(it => `<tr>
         <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
-        <td><strong>${it.name}</strong>${it.desc ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${it.desc}</div>` : ''}</td>
-        <td><span class="mono" style="font-size:11px">${esc(it.cron)}</span></td>
+        <td><strong>${it.name}</strong>${it.desc ? `<span style="display:inline-block;margin-left:7px;padding:1px 8px;border-radius:99px;font-size:11px;font-weight:500;background:#eff6ff;color:#1d4ed8;vertical-align:middle">${it.desc}</span>` : ''}</td>
         <td>${runStatusBadge(it.status, it.errMsg)}</td>
         <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
+        <td style="font-size:12px;white-space:nowrap">${fmtDate(it.nextRun)||'—'}</td>
       </tr>`).join('');
 
   const recRows = recs => recs.slice(0, 15).map(r => `<tr>
@@ -451,7 +451,7 @@ function renderDashFreq(key) {
       ${statCard(ps, prev.label + ' 備份統計')}
     </div>
     <div class="table-wrap" style="margin-bottom:4px"><table>
-      <thead><tr><th>類別</th><th>名稱</th><th>Cron</th><th>上次結果</th><th>最後執行</th></tr></thead>
+      <thead><tr><th>類別</th><th>名稱</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
       <tbody>${itemRows}</tbody>
     </table></div>
     ${recSection(curr.label, currRecs)}
@@ -526,10 +526,10 @@ function renderDashFreq(key) {
     ? `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px">此頻率無排程項目</td></tr>`
     : items.map(it => `<tr>
         <td><span class="badge ${it.typeClass}" style="font-size:11px">${it.typeLabel}</span></td>
-        <td><strong>${it.name}</strong>${it.desc ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">${it.desc}</div>` : ''}</td>
-        <td><span class="mono" style="font-size:11px">${esc(it.cron)}</span></td>
+        <td><strong>${it.name}</strong>${it.desc ? `<span style="display:inline-block;margin-left:7px;padding:1px 8px;border-radius:99px;font-size:11px;font-weight:500;background:#eff6ff;color:#1d4ed8;vertical-align:middle">${it.desc}</span>` : ''}</td>
         <td>${runStatusBadge(it.status, it.errMsg)}</td>
         <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun)||'—'}</td>
+        <td style="font-size:12px;white-space:nowrap">${fmtDate(it.nextRun)||'—'}</td>
       </tr>`).join('');
 
   const recRows = recs => recs.slice(0, 15).map(r => `<tr>
@@ -554,7 +554,7 @@ function renderDashFreq(key) {
       ${statCard(ps, prev.label + ' 備份統計')}
     </div>
     <div class="table-wrap" style="margin-bottom:4px"><table>
-      <thead><tr><th>類別</th><th>名稱</th><th>Cron</th><th>上次結果</th><th>最後執行</th></tr></thead>
+      <thead><tr><th>類別</th><th>名稱</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
       <tbody>${itemRows}</tbody>
     </table></div>
     ${recSection(curr.label, currRecs)}
