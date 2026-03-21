@@ -598,19 +598,23 @@ function renderDashFreq(key) {
         <td style="font-size:12px;white-space:nowrap">${fmtDate(it.nextRun)||'—'}</td>
       </tr>`).join('');
 
-  const recRows = recs => recs.slice(0, 15).map(r => `<tr>
+  const recRows = recs => {
+    recs.forEach(r => { if (r.error_msg) _recordErrors[r.id] = { msg: r.error_msg, projectId: r.project_id }; });
+    return recs.slice(0, 15).map(r => `<tr>
     <td>${typeBadge(r.type)}</td>
     <td><span class="truncate">${esc(r.project_name||r.label||'—')}</span></td>
     <td>${statusBadge(r.status, r.error_msg)}</td>
     <td>${fmtSize(r.size_bytes)}</td>
     <td style="font-size:12px;white-space:nowrap">${fmtDate(r.created_at)}</td>
+    <td class="td-actions">${r.status==='failed'&&r.error_msg ? `<button class="btn btn-xs btn-danger" onclick="showRecordError(${r.id})">檢視原因</button>` : ''}</td>
   </tr>`).join('');
+  };
 
   const recSection = (label, recs) => recs.length === 0
     ? `<div style="color:var(--text3);font-size:12px;padding:4px 0">${label}：無備份紀錄</div>`
     : `<div style="font-size:12px;font-weight:600;margin:14px 0 6px;color:var(--text)">${label} 備份紀錄（${recs.length} 筆）</div>
        <div class="table-wrap"><table>
-         <thead><tr><th>類型</th><th>名稱</th><th>狀態</th><th>大小</th><th>時間</th></tr></thead>
+         <thead><tr><th>類型</th><th>名稱</th><th>狀態</th><th>大小</th><th>時間</th><th></th></tr></thead>
          <tbody>${recRows(recs)}</tbody>
        </table></div>`;
 
@@ -750,15 +754,19 @@ async function renderDashboard() {
         ${recentRecs.length === 0 ? '<div class="empty"><div class="empty-icon">🗂</div>尚無備份紀錄</div>' : `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>時間</th><th>耗時</th></tr></thead>
-            <tbody>${recentRecs.map(r => `<tr>
+            <thead><tr><th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>時間</th><th>耗時</th><th></th></tr></thead>
+            <tbody>${recentRecs.map(r => {
+              if (r.error_msg) _recordErrors[r.id] = { msg: r.error_msg, projectId: r.project_id };
+              return `<tr>
               <td><span class="truncate">${esc(r.project_name)}</span></td>
               <td>${typeBadge(r.type)}</td>
               <td>${statusBadge(r.status, r.error_msg)}</td>
               <td>${fmtSize(r.size_bytes)}</td>
               <td style="white-space:nowrap">${fmtDate(r.created_at)}</td>
               <td>${fmtDur(r.duration_sec)}</td>
-            </tr>`).join('')}</tbody>
+              <td class="td-actions">${r.status==='failed'&&r.error_msg ? `<button class="btn btn-xs btn-danger" onclick="showRecordError(${r.id})">檢視原因</button>` : ''}</td>
+            </tr>`;
+            }).join('')}</tbody>
           </table>
         </div>`}
       </div>
@@ -3180,15 +3188,19 @@ async function renderOnlineSecHistory() {
       ${recs.length === 0 ? `<div class="empty"><div class="empty-icon">🗂</div>${statusFilter?'無失敗備份紀錄':'尚無備份紀錄'}</div>` : `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>耗時</th><th>時間</th></tr></thead>
-          <tbody>${recs.map(r => `<tr>
+          <thead><tr><th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>耗時</th><th>時間</th><th></th></tr></thead>
+          <tbody>${recs.map(r => {
+            if (r.error_msg) _recordErrors[r.id] = { msg: r.error_msg, projectId: r.project_id };
+            return `<tr>
             <td><span class="truncate">${esc(r.project_name || '—')}</span></td>
             <td>${typeBadge(r.type)}</td>
             <td>${statusBadge(r.status, r.error_msg)}</td>
             <td>${fmtSize(r.size_bytes)}</td>
             <td>${fmtDur(r.duration_sec)}</td>
             <td style="font-size:12px;white-space:nowrap">${fmtDate(r.created_at)}</td>
-          </tr>`).join('')}</tbody>
+            <td class="td-actions">${r.status==='failed'&&r.error_msg ? `<button class="btn btn-xs btn-danger" onclick="showRecordError(${r.id})">檢視原因</button>` : ''}</td>
+          </tr>`;
+          }).join('')}</tbody>
         </table>
       </div>`}
     `;
