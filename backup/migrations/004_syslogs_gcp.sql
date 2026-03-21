@@ -13,13 +13,6 @@ CREATE TABLE IF NOT EXISTS syslog_configs (
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
--- 預設插入兩筆（auth 與 system）
-INSERT INTO syslog_configs (name, log_type, log_files, dest, compress, enabled)
-VALUES
-  ('Auth 日誌備份',   'auth',   '{"/var/log/auth.log"}',  '/mnt/nas/backup/os/auth',   false, true),
-  ('System 日誌備份', 'system', '{"/var/log/syslog"}',     '/mnt/nas/backup/os/system', true,  true)
-ON CONFLICT DO NOTHING;
-
 -- GCP 備份設定
 CREATE TABLE IF NOT EXISTS gcp_configs (
     id              SERIAL PRIMARY KEY,

@@ -20,18 +20,4 @@ VALUES (
     SET backup_dir    = EXCLUDED.backup_dir,
         backup_db_dir = EXCLUDED.backup_db_dir;
 
--- 新增 system journal 日誌備份（來源為 systemd journal，需透過 agent 執行）
--- journal_units 留空 = 匯出全部 journal；可在 UI 編輯指定特定 unit（如 ssh.service）
-INSERT INTO syslog_configs
-    (name, log_type, source_type, log_files, journal_units, journal_format, dest, compress, enabled)
-VALUES (
-    'System 日誌 (Journal)',
-    'system',
-    'journal',
-    '{}',
-    '{}',
-    'short',
-    '/mnt/nas/backup/os/system-journal',
-    true,
-    true
-) ON CONFLICT (name) DO NOTHING;
+
