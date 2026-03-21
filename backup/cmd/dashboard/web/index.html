@@ -190,6 +190,7 @@ select.form-input{width:auto}
     <nav class="sidebar-nav">
       <div class="nav-section">主要功能</div>
       <div class="nav-item" data-p="dashboard"><span class="ni">📊</span>總覽</div>
+      <div class="nav-item" data-p="onlinesec"><span class="ni">🛡️</span>線上服務與資安</div>
       <div class="nav-item" data-p="projects"><span class="ni">📁</span>專案管理</div>
       <div class="nav-item" data-p="backups"><span class="ni">🗂</span>備份紀錄</div>
       <div class="nav-section">系統備份</div>
@@ -198,9 +199,6 @@ select.form-input{width:auto}
       <div class="nav-item" data-p="schedules"><span class="ni">🗓</span>排程管理</div>
       <div class="nav-section">系統</div>
       <div class="nav-item" data-p="capabilities"><span class="ni">⚙️</span>系統功能</div>
-      <div class="nav-section">線上服務</div>
-      <div class="nav-item" data-p="onlinesec"><span class="ni">🛡️</span>線上服務與資安</div>
-      <div class="nav-item-desc">監控網站異常、處理館方叫修需求。</div>
     </nav>
   </aside>
   <div class="main">
@@ -338,6 +336,7 @@ let currentPage = 'dashboard';
 let currentProjectId = null;
 let currentTab = 'targets';
 let currentOnlineSecTab = 'calendar';
+let _onlineSecHistoryFilter = '';
 
 function navigate(page, projectId = null) {
   currentPage = page;
@@ -609,13 +608,26 @@ async function renderDashboard() {
     const gcpsEnabled  = gcpArr.filter(g => g.enabled).length;
     const gcpsFailed   = gcpArr.filter(g => g.run_status === 'failed').length;
 
+    // 從備份紀錄推導各專案最新狀態（補足 last_run_status 為空的情況）
+    const projLastRec = {};
+    allRecs.forEach(r => {
+      if (r.project_id) {
+        if (!projLastRec[r.project_id] || new Date(r.created_at) > new Date(projLastRec[r.project_id].created_at)) {
+          projLastRec[r.project_id] = r;
+        }
+      }
+    });
+
     const allItems = [
       ...scheds.filter(s => s.enabled && s.cron_expr).map(s => ({
         typeLabel: '🗓 專案排程', typeClass: 'badge-system',
         name: esc(s.project_name||''),
         desc: projDescMap[s.project_id]||'',
-        cron: s.cron_expr, status: s.last_run_status, errMsg: '',
-        lastRun: s.last_run_at, nextRun: s.next_run_at,
+        cron: s.cron_expr,
+        status: s.last_run_status || (projLastRec[s.project_id]?.status) || '',
+        errMsg: '',
+        lastRun: s.last_run_at || (projLastRec[s.project_id]?.created_at) || null,
+        nextRun: s.next_run_at,
       })),
       ...syls.filter(s => s.enabled && s.cron_expr).map(s => ({
         typeLabel: '📋 系統日誌', typeClass: 'badge-files',
@@ -2844,7 +2856,7 @@ async function renderOnlineSec() {
     </div>
     <div class="tabs" id="onlinesec-tabs">
       <div class="tab${currentOnlineSecTab==='calendar'?' active':''}" onclick="switchOnlineSecTab('calendar')">📅 每日備份狀態行事曆</div>
-      <div class="tab${currentOnlineSecTab==='history'?' active':''}" onclick="switchOnlineSecTab('history')">📋 歷史備份紀錄</div>
+      <div class="tab${currentOnlineSecTab==='history'?' active':''}" onclick="_onlineSecHistoryFilter='';switchOnlineSecTab('history')">📋 歷史備份紀錄</div>
       <div class="tab${currentOnlineSecTab==='security'?' active':''}" onclick="switchOnlineSecTab('security')">🛡️ 季度資安弱點掃描紀錄</div>
       <div class="tab${currentOnlineSecTab==='cases'?' active':''}" onclick="switchOnlineSecTab('cases')">📝 案件列表</div>
     </div>
@@ -2874,10 +2886,10 @@ function switchOnlineSecTab(tab) {
 }
 
 function _calStatusIcon(status) {
-  if (status === 'success') return '<span style="color:var(--success);font-size:16px;line-height:1">✓</span>';
-  if (status === 'failed')  return '<span style="color:var(--danger);font-size:16px;line-height:1">✕</span>';
-  if (status === 'running') return '<span style="font-size:14px;line-height:1">⏳</span>';
-  if (status === 'pending') return '<span style="font-size:13px;line-height:1">🔜</span>';
+  if (status === 'success') return '<span style="display:inline-block;width:13px;height:13px;border-radius:50%;background:var(--success);vertical-align:middle"></span>';
+  if (status === 'failed')  return '<span style="display:inline-block;width:13px;height:13px;border-radius:50%;background:var(--danger);vertical-align:middle"></span>';
+  if (status === 'running') return '<span style="font-size:13px;vertical-align:middle">⏳</span>';
+  if (status === 'pending') return '<span style="font-size:12px;vertical-align:middle">🔜</span>';
   return '';
 }
 
@@ -2919,7 +2931,7 @@ async function renderOnlineSecCalendar() {
       }
     });
 
-    // Pending future dates from next_run_at
+    // Pending future dates
     const pendingDates = new Set();
     scheds.filter(s => s.enabled && s.next_run_at).forEach(s => {
       const d = new Date(s.next_run_at);
@@ -2930,10 +2942,10 @@ async function renderOnlineSecCalendar() {
 
     function dayStatus(dateStr) {
       const recs = recordsByDay[dateStr] || [];
-      if (recs.some(r => r.status === 'running'))                              return 'running';
-      if (recs.some(r => r.status === 'failed'))                               return 'failed';
-      if (recs.length > 0 && recs.every(r => r.status === 'success'))         return 'success';
-      if (dateStr > todayStr && pendingDates.has(dateStr))                     return 'pending';
+      if (recs.some(r => r.status === 'running'))                        return 'running';
+      if (recs.some(r => r.status === 'failed'))                         return 'failed';
+      if (recs.length > 0 && recs.every(r => r.status === 'success'))   return 'success';
+      if (dateStr > todayStr && pendingDates.has(dateStr))               return 'pending';
       return 'none';
     }
 
@@ -2959,25 +2971,36 @@ async function renderOnlineSecCalendar() {
       </div>`;
     }
 
-    // ── Side panels (今日 / 昨日) ──
-    function sidePanel(label, recs) {
+    // ── Side panels (今日 / 昨日) side by side ──
+    function sidePanel(label, dateStr, recs) {
       const ok   = recs.filter(r => r.status === 'success').length;
       const fail = recs.filter(r => r.status === 'failed').length;
       const sz   = recs.reduce((a, r) => a + (r.size_bytes || 0), 0);
-      return `<div class="card" style="padding:14px;margin-bottom:10px">
-        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.4px">${label}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center">
-          <div><div style="font-size:22px;font-weight:800;color:var(--text)">${recs.length}</div><div style="font-size:11px;color:var(--text2)">總計</div></div>
-          <div><div style="font-size:22px;font-weight:800;color:var(--success)">${ok}</div><div style="font-size:11px;color:var(--text2)">成功</div></div>
-          <div><div style="font-size:22px;font-weight:800;color:var(--danger)">${fail}</div><div style="font-size:11px;color:var(--text2)">失敗</div></div>
+      return `<div class="card" style="padding:14px;flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--text)">${label}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">${dateStr}</div>
+          </div>
+          <div style="font-size:26px;font-weight:800;color:var(--text);line-height:1">${recs.length}</div>
         </div>
-        ${recs.length > 0
-          ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">總大小：${fmtSize(sz)}</div>`
-          : `<div style="font-size:12px;color:var(--text3);margin-top:6px;text-align:center">無備份紀錄</div>`}
+        <div style="display:flex;flex-direction:column;gap:5px;margin:8px 0">
+          <div style="display:flex;align-items:center;gap:6px;font-size:13px">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--success);flex-shrink:0"></span>
+            <span style="color:var(--text2)">成功</span>
+            <span style="font-weight:700;margin-left:auto;color:var(--success)">${ok}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:13px">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--danger);flex-shrink:0"></span>
+            <span style="color:var(--text2)">失敗</span>
+            <span style="font-weight:700;margin-left:auto;color:var(--danger)">${fail}</span>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--text2);border-top:1px solid var(--border);padding-top:6px">總大小：${fmtSize(sz)}</div>
       </div>`;
     }
 
-    // ── Bottom table (all active items) ──
+    // ── Active items table ──
     const allActiveItems = [
       ...scheds.filter(s => s.enabled).map(s => ({
         name: s.project_name || '—', status: s.last_run_status, lastRun: s.last_run_at, nextRun: s.next_run_at,
@@ -2991,7 +3014,7 @@ async function renderOnlineSecCalendar() {
     ];
 
     const itemRows = allActiveItems.length === 0
-      ? '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px">無啟用中的備份項目</td></tr>'
+      ? '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:16px">無啟用中的備份項目</td></tr>'
       : allActiveItems.map(it => `<tr>
           <td><strong>${esc(it.name)}</strong></td>
           <td>${runStatusBadge(it.status)}</td>
@@ -3003,40 +3026,40 @@ async function renderOnlineSecCalendar() {
     if (!tc) return;
     tc.innerHTML = `
       <div class="stat-grid" style="margin-bottom:20px">
-        <div class="stat-card c-green" style="cursor:pointer" onclick="switchOnlineSecTab('history')" title="查看歷史備份紀錄">
+        <div class="stat-card c-green" style="cursor:pointer" onclick="_onlineSecHistoryFilter='';switchOnlineSecTab('history')" title="查看歷史備份紀錄">
           <div class="stat-label">備份總次數</div>
-          <div class="stat-value">${totalCount}</div>
-          <div class="stat-sub" style="color:var(--primary)">歷史備份紀錄 →</div>
+          <div class="stat-value" style="text-align:right">${totalCount}</div>
+          <div class="stat-sub" style="text-align:right;color:var(--primary)">歷史備份紀錄 →</div>
         </div>
-        <div class="stat-card ${failedCount>0?'c-red':'c-green'}" style="cursor:pointer" onclick="switchOnlineSecTab('history')" title="查看備份失敗紀錄">
+        <div class="stat-card ${failedCount>0?'c-red':'c-green'}" style="cursor:pointer" onclick="_onlineSecHistoryFilter='failed';switchOnlineSecTab('history')" title="查看失敗備份紀錄">
           <div class="stat-label">失敗總次數</div>
-          <div class="stat-value">${failedCount}</div>
-          <div class="stat-sub" style="color:var(--${failedCount>0?'danger':'success'})">備份失敗紀錄 →</div>
+          <div class="stat-value" style="text-align:right">${failedCount}</div>
+          <div class="stat-sub" style="text-align:right;color:var(--${failedCount>0?'danger':'success'})">備份失敗紀錄 →</div>
         </div>
         <div class="stat-card c-yellow">
           <div class="stat-label">備份總大小</div>
-          <div class="stat-value">${fmtSize(totalSize)}</div>
-          <div class="stat-sub">所有歷史備份</div>
+          <div class="stat-value" style="text-align:right">${fmtSize(totalSize)}</div>
+          <div class="stat-sub" style="text-align:right">所有歷史備份</div>
         </div>
         <div class="stat-card c-blue">
           <div class="stat-label">系統日誌</div>
-          <div class="stat-value">${sylsEnabled}</div>
-          <div class="stat-sub">啟用中</div>
+          <div class="stat-value" style="text-align:right">${sylsEnabled}</div>
+          <div class="stat-sub" style="text-align:right">啟用中</div>
         </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 230px;gap:16px;margin-bottom:20px;align-items:start">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
         <div class="card" style="padding:0;overflow:hidden">
-          <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
             <h3 style="font-size:14px;font-weight:700">${monthName} 備份狀態</h3>
-            <div style="display:flex;gap:12px;font-size:12px;color:var(--text2);flex-wrap:wrap">
-              <span style="display:inline-flex;align-items:center;gap:4px"><span style="color:var(--success);font-size:14px">✓</span>成功</span>
-              <span style="display:inline-flex;align-items:center;gap:4px"><span style="color:var(--danger);font-size:14px">✕</span>失敗</span>
-              <span style="display:inline-flex;align-items:center;gap:4px"><span style="font-size:13px">⏳</span>進行中</span>
-              <span style="display:inline-flex;align-items:center;gap:4px"><span style="font-size:12px">🔜</span>待執行</span>
+            <div style="display:flex;gap:10px;font-size:12px;color:var(--text2);flex-wrap:wrap">
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--success)"></span>成功</span>
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--danger)"></span>失敗</span>
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="font-size:11px">⏳</span>進行中</span>
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="font-size:11px">🔜</span>待執行</span>
             </div>
           </div>
-          <div style="padding:12px 14px">
+          <div style="padding:10px 12px">
             <div class="cal-grid">
               <div class="cal-hdr">一</div><div class="cal-hdr">二</div><div class="cal-hdr">三</div>
               <div class="cal-hdr">四</div><div class="cal-hdr">五</div>
@@ -3046,21 +3069,23 @@ async function renderOnlineSecCalendar() {
             </div>
           </div>
         </div>
-        <div>
-          ${sidePanel('今日備份統計', recordsByDay[todayStr] || [])}
-          ${sidePanel('昨日備份統計', recordsByDay[yStr] || [])}
-        </div>
-      </div>
 
-      <div class="card" style="padding:0;overflow:hidden">
-        <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
-          <h3 style="font-size:14px;font-weight:700">備份項目清單</h3>
-        </div>
-        <div class="table-wrap" style="border:none;border-radius:0">
-          <table>
-            <thead><tr><th>名稱</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
-            <tbody>${itemRows}</tbody>
-          </table>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;gap:10px">
+            ${sidePanel('今日', todayStr, recordsByDay[todayStr] || [])}
+            ${sidePanel('昨日', yStr, recordsByDay[yStr] || [])}
+          </div>
+          <div class="card" style="padding:0;overflow:hidden">
+            <div style="padding:10px 14px;border-bottom:1px solid var(--border)">
+              <h3 style="font-size:13px;font-weight:700">啟用中備份項目</h3>
+            </div>
+            <div class="table-wrap" style="border:none;border-radius:0">
+              <table>
+                <thead><tr><th>名稱</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
+                <tbody>${itemRows}</tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -3072,22 +3097,23 @@ async function renderOnlineSecCalendar() {
 
 async function renderOnlineSecHistory() {
   try {
-    const [data, projects] = await Promise.all([
-      apiGet('/api/backups?limit=100'),
-      apiGet('/api/projects').catch(() => []),
-    ]);
+    const statusFilter = _onlineSecHistoryFilter || '';
+    const url = statusFilter ? `/api/backups?limit=200&status=${statusFilter}` : '/api/backups?limit=200';
+    const data = await apiGet(url);
     const recs  = data.records || [];
     const total = data.total   || 0;
+    const pageTitle = statusFilter === 'failed' ? '備份失敗紀錄' : '歷史備份紀錄';
     const tc = document.getElementById('onlinesec-tab-content');
     if (!tc) return;
     tc.innerHTML = `
       <div class="page-hdr" style="margin-bottom:14px">
-        <div class="page-hdr-left"><h2 style="font-size:18px;font-weight:700">歷史備份紀錄</h2><p>共 ${total} 筆</p></div>
+        <div class="page-hdr-left"><h2 style="font-size:18px;font-weight:700">${pageTitle}</h2><p>共 ${total} 筆${statusFilter?' （僅顯示失敗）':''}</p></div>
         <div class="page-hdr-right">
+          ${statusFilter ? `<button class="btn btn-sm btn-secondary" onclick="_onlineSecHistoryFilter='';renderOnlineSecHistory()">顯示全部</button>` : ''}
           <button class="btn btn-sm btn-secondary" onclick="renderOnlineSecHistory()">↺ 重新整理</button>
         </div>
       </div>
-      ${recs.length === 0 ? '<div class="empty"><div class="empty-icon">🗂</div>尚無備份紀錄</div>' : `
+      ${recs.length === 0 ? `<div class="empty"><div class="empty-icon">🗂</div>${statusFilter?'無失敗備份紀錄':'尚無備份紀錄'}</div>` : `
       <div class="table-wrap">
         <table>
           <thead><tr><th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>耗時</th><th>時間</th></tr></thead>
