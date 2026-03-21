@@ -171,8 +171,8 @@ select.form-input{width:auto}
 .cal-cell{min-height:58px;border-radius:6px;padding:5px 7px;border:1px solid var(--border);background:var(--surface);position:relative}
 .cal-empty{border:none!important;background:none!important;min-height:58px}
 .cal-today{outline:2px solid var(--primary);outline-offset:-2px}
-.cal-success{background:var(--success-bg);border-color:var(--success)}
-.cal-failed{background:var(--danger-bg);border-color:var(--danger)}
+.cal-success{background:var(--surface);border-color:var(--border)}
+.cal-failed{background:var(--surface);border-color:var(--border)}
 .cal-running{background:var(--warning-bg);border-color:var(--warning)}
 .cal-pending{background:var(--info-bg);border-color:var(--info)}
 .cal-day-num{font-size:11px;font-weight:600;color:var(--text);line-height:1;text-align:right;display:block}
@@ -2934,8 +2934,8 @@ function switchOnlineSecTab(tab) {
 }
 
 function _calStatusIcon(status) {
-  if (status === 'success') return '<span style="color:var(--success);font-size:15px;font-weight:700;line-height:1">✓</span>';
-  if (status === 'failed')  return '<span style="color:var(--danger);font-size:15px;font-weight:700;line-height:1">✕</span>';
+  if (status === 'success') return '<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:2px solid var(--success);color:var(--success);font-size:12px;font-weight:700;line-height:1">✓</span>';
+  if (status === 'failed')  return '<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:2px solid var(--danger);color:var(--danger);font-size:12px;font-weight:700;line-height:1">✕</span>';
   if (status === 'running') return '<span style="font-size:13px;line-height:1">⏳</span>';
   if (status === 'pending') return '<span style="font-size:12px;line-height:1">🔜</span>';
   return '';
@@ -3027,8 +3027,8 @@ async function renderOnlineSecCalendar() {
       return `<div class="card" style="padding:14px;flex:1;min-width:0">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
-            <div style="font-size:15px;font-weight:800;color:var(--text);line-height:1.2">${label}</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:3px">${dateStr}</div>
+            <div style="font-size:19px;font-weight:800;color:var(--text);line-height:1.2">${label}</div>
+            <div style="font-size:13px;color:var(--text2);margin-top:4px">${dateStr}</div>
           </div>
           <div style="text-align:right">
             <div style="font-size:32px;font-weight:800;color:var(--text);line-height:1">${recs.length}</div>
@@ -3116,8 +3116,8 @@ async function renderOnlineSecCalendar() {
           <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
             <h3 style="font-size:14px;font-weight:700">${monthName} 備份狀態</h3>
             <div style="display:flex;gap:10px;font-size:12px;color:var(--text2);flex-wrap:wrap">
-              <span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--success)"></span>成功</span>
-              <span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--danger)"></span>失敗</span>
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:2px solid var(--success);color:var(--success);font-size:10px;font-weight:700;line-height:1">✓</span>成功</span>
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:2px solid var(--danger);color:var(--danger);font-size:10px;font-weight:700;line-height:1">✕</span>失敗</span>
               <span style="display:inline-flex;align-items:center;gap:4px"><span style="font-size:11px">⏳</span>進行中</span>
               <span style="display:inline-flex;align-items:center;gap:4px"><span style="font-size:11px">🔜</span>待執行</span>
             </div>
