@@ -165,6 +165,20 @@ select.form-input{width:auto}
 .m-get{background:#dbeafe;color:#1d4ed8}.m-post{background:#dcfce7;color:#15803d}
 .m-put{background:#fef9c3;color:#a16207}.m-delete{background:#fee2e2;color:#b91c1c}
 .m-patch{background:#f3e8ff;color:#7e22ce}
+/* Calendar */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-hdr{text-align:center;font-size:12px;font-weight:600;color:var(--text2);padding:5px 0;background:var(--surface2);border-radius:3px}
+.cal-cell{min-height:58px;border-radius:6px;padding:5px 7px;border:1px solid var(--border);background:var(--surface)}
+.cal-empty{border:none!important;background:none!important;min-height:58px}
+.cal-today{outline:2px solid var(--primary);outline-offset:-2px}
+.cal-success{background:var(--success-bg);border-color:var(--success-border)}
+.cal-failed{background:var(--danger-bg);border-color:var(--danger-border)}
+.cal-running{background:var(--warning-bg);border-color:var(--warning)}
+.cal-pending{background:var(--info-bg);border-color:var(--info)}
+.cal-day-num{font-size:11px;font-weight:600;color:var(--text);line-height:1}
+.cal-day-icon{font-size:15px;text-align:center;margin-top:4px;line-height:1.2}
+/* Nav description */
+.nav-item-desc{padding:2px 16px 9px 46px;font-size:11px;color:rgba(255,255,255,.35);line-height:1.4;margin-top:-6px}
 </style>
 </head>
 <body>
@@ -184,6 +198,9 @@ select.form-input{width:auto}
       <div class="nav-item" data-p="schedules"><span class="ni">🗓</span>排程管理</div>
       <div class="nav-section">系統</div>
       <div class="nav-item" data-p="capabilities"><span class="ni">⚙️</span>系統功能</div>
+      <div class="nav-section">線上服務</div>
+      <div class="nav-item" data-p="onlinesec"><span class="ni">🛡️</span>線上服務與資安</div>
+      <div class="nav-item-desc">監控網站異常、處理館方叫修需求。</div>
     </nav>
   </aside>
   <div class="main">
@@ -320,11 +337,13 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 let currentPage = 'dashboard';
 let currentProjectId = null;
 let currentTab = 'targets';
+let currentOnlineSecTab = 'calendar';
 
 function navigate(page, projectId = null) {
   currentPage = page;
   currentProjectId = projectId;
   currentTab = 'targets';
+  currentOnlineSecTab = 'calendar';
   window.location.hash = projectId ? `#${page}/${projectId}` : `#${page}`;
   renderPage();
   updateNav();
@@ -628,11 +647,6 @@ async function renderDashboard() {
 
     setContent(`
       <div class="stat-grid">
-        <div class="stat-card c-blue">
-          <div class="stat-label">專案總數</div>
-          <div class="stat-value">${projs.length}</div>
-          <div class="stat-sub">個備份專案</div>
-        </div>
         <div class="stat-card c-green">
           <div class="stat-label">備份總次數</div>
           <div class="stat-value">${totalBackups}</div>
@@ -648,43 +662,13 @@ async function renderDashboard() {
           <div class="stat-value">${totalGB.toFixed(1)}</div>
           <div class="stat-sub">GB</div>
         </div>
-        <div class="stat-card c-blue">
-          <div class="stat-label">🗓 排程管理</div>
-          <div class="stat-value">${schedEnabled}</div>
-          <div class="stat-sub">共 ${scheds.length} 個，啟用 ${schedEnabled} 個</div>
-        </div>
         <div class="stat-card ${sylsFailed>0?'c-red':'c-green'}">
           <div class="stat-label">📋 系統日誌</div>
           <div class="stat-value">${syls.length}</div>
           <div class="stat-sub">啟用 ${sylsEnabled} 個${sylsFailed>0?`，<span style="color:var(--danger)">${sylsFailed} 失敗</span>`:''}</div>
         </div>
-        <div class="stat-card ${gcpsFailed>0?'c-red':'c-green'}">
-          <div class="stat-label">☁️ GCP 備份</div>
-          <div class="stat-value">${gcpArr.length}</div>
-          <div class="stat-sub">啟用 ${gcpsEnabled} 個${gcpsFailed>0?`，<span style="color:var(--danger)">${gcpsFailed} 失敗</span>`:''}</div>
-        </div>
       </div>
 
-      <div class="sg">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h2 style="font-size:15px;font-weight:700">專案狀態</h2>
-          <button class="btn btn-sm btn-primary" onclick="navigate('projects')">管理專案</button>
-        </div>
-        ${projs.length === 0 ? '<div class="empty"><div class="empty-icon">📭</div>尚無專案，請先新增備份專案</div>' :
-          `<div class="proj-grid">${projs.map(p => `
-          <div class="proj-card" onclick="navigate('project', ${p.project_id})">
-            <div class="proj-card-top">
-              <div><h3>${esc(p.project_name)}</h3></div>
-              ${statusBadge(p.last_status||'—')}
-            </div>
-            <div style="font-size:12px;color:var(--text2)">最後備份：${fmtDate(p.last_backup_at)}</div>
-            <div class="proj-stats">
-              <div class="proj-stat-item"><strong>${p.total_count||0}</strong>次備份</div>
-              <div class="proj-stat-item"><strong>${p.failed_count||0}</strong>次失敗</div>
-              <div class="proj-stat-item"><strong>${(p.total_size_gb||0).toFixed(2)}</strong> GB</div>
-            </div>
-          </div>`).join('')}</div>`}
-      </div>
 
       <div class="sg">
         <div class="flex-c" style="margin-bottom:4px">
@@ -2847,6 +2831,320 @@ async function deleteScheduleAll(projId, sid) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   線上服務與資安
+═══════════════════════════════════════════════════════════════ */
+async function renderOnlineSec() {
+  setTitle('線上服務與資安');
+  setContent(`
+    <div class="page-hdr">
+      <div class="page-hdr-left">
+        <h1>線上服務與資安</h1>
+        <p>監控網站異常、處理館方叫修需求。</p>
+      </div>
+    </div>
+    <div class="tabs" id="onlinesec-tabs">
+      <div class="tab${currentOnlineSecTab==='calendar'?' active':''}" onclick="switchOnlineSecTab('calendar')">📅 每日備份狀態行事曆</div>
+      <div class="tab${currentOnlineSecTab==='history'?' active':''}" onclick="switchOnlineSecTab('history')">📋 歷史備份紀錄</div>
+      <div class="tab${currentOnlineSecTab==='security'?' active':''}" onclick="switchOnlineSecTab('security')">🛡️ 季度資安弱點掃描紀錄</div>
+      <div class="tab${currentOnlineSecTab==='cases'?' active':''}" onclick="switchOnlineSecTab('cases')">📝 案件列表</div>
+    </div>
+    <div id="onlinesec-tab-content"><div class="loading"><div class="spinner"></div>載入中...</div></div>
+  `);
+  switchOnlineSecTab(currentOnlineSecTab);
+}
+
+function switchOnlineSecTab(tab) {
+  currentOnlineSecTab = tab;
+  const tabLabelMap = {
+    calendar: '📅 每日備份狀態行事曆',
+    history:  '📋 歷史備份紀錄',
+    security: '🛡️ 季度資安弱點掃描紀錄',
+    cases:    '📝 案件列表',
+  };
+  document.querySelectorAll('#onlinesec-tabs .tab').forEach(el => {
+    el.classList.toggle('active', el.textContent.trim() === tabLabelMap[tab]);
+  });
+  const tc = document.getElementById('onlinesec-tab-content');
+  if (!tc) return;
+  tc.innerHTML = '<div class="loading"><div class="spinner"></div>載入中...</div>';
+  if (tab === 'calendar') renderOnlineSecCalendar();
+  else if (tab === 'history')  renderOnlineSecHistory();
+  else if (tab === 'security') renderOnlineSecSecurity();
+  else if (tab === 'cases')    renderOnlineSecCases();
+}
+
+function _calStatusIcon(status) {
+  if (status === 'success') return '<span style="color:var(--success);font-size:16px;line-height:1">✓</span>';
+  if (status === 'failed')  return '<span style="color:var(--danger);font-size:16px;line-height:1">✕</span>';
+  if (status === 'running') return '<span style="font-size:14px;line-height:1">⏳</span>';
+  if (status === 'pending') return '<span style="font-size:13px;line-height:1">🔜</span>';
+  return '';
+}
+
+async function renderOnlineSecCalendar() {
+  try {
+    const [recordsData, syslogs, projScheds, gcps] = await Promise.all([
+      apiGet('/api/backups?limit=500'),
+      apiGet('/api/syslogs'),
+      apiGet('/api/schedules/all'),
+      apiGet('/api/gcpconfigs'),
+    ]);
+    const allRecs = recordsData.records || [];
+    const syls    = syslogs || [];
+    const scheds  = projScheds || [];
+    const gcpArr  = gcps || [];
+
+    // ── Top stats ──
+    const totalCount  = allRecs.length;
+    const failedCount = allRecs.filter(r => r.status === 'failed').length;
+    const totalSize   = allRecs.reduce((a, r) => a + (r.size_bytes || 0), 0);
+    const sylsEnabled = syls.filter(s => s.enabled).length;
+
+    // ── Calendar ──
+    const now       = new Date();
+    const year      = now.getFullYear();
+    const month     = now.getMonth();
+    const todayStr  = `${year}-${String(month+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    const yDate     = new Date(+new Date(year, month, now.getDate()) - 86400000);
+    const yStr      = `${yDate.getFullYear()}-${String(yDate.getMonth()+1).padStart(2,'0')}-${String(yDate.getDate()).padStart(2,'0')}`;
+
+    // Group records by day (current month)
+    const recordsByDay = {};
+    allRecs.forEach(r => {
+      const d = new Date(r.created_at);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        recordsByDay[key] = recordsByDay[key] || [];
+        recordsByDay[key].push(r);
+      }
+    });
+
+    // Pending future dates from next_run_at
+    const pendingDates = new Set();
+    scheds.filter(s => s.enabled && s.next_run_at).forEach(s => {
+      const d = new Date(s.next_run_at);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        pendingDates.add(`${year}-${String(month+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
+      }
+    });
+
+    function dayStatus(dateStr) {
+      const recs = recordsByDay[dateStr] || [];
+      if (recs.some(r => r.status === 'running'))                              return 'running';
+      if (recs.some(r => r.status === 'failed'))                               return 'failed';
+      if (recs.length > 0 && recs.every(r => r.status === 'success'))         return 'success';
+      if (dateStr > todayStr && pendingDates.has(dateStr))                     return 'pending';
+      return 'none';
+    }
+
+    // Build calendar grid (Monday first)
+    const daysInMonth  = new Date(year, month + 1, 0).getDate();
+    const rawFirstDay  = new Date(year, month, 1).getDay();
+    const startPadding = rawFirstDay === 0 ? 6 : rawFirstDay - 1;
+    const monthName    = now.toLocaleDateString('zh-TW', { year: 'numeric', month: 'long' });
+
+    let calCells = '';
+    for (let i = 0; i < startPadding; i++) calCells += '<div class="cal-cell cal-empty"></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr  = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const status   = dayStatus(dateStr);
+      const dayRecs  = recordsByDay[dateStr] || [];
+      const isToday  = dateStr === todayStr;
+      const ok       = dayRecs.filter(r => r.status === 'success').length;
+      const fail     = dayRecs.filter(r => r.status === 'failed').length;
+      const tip      = dayRecs.length > 0 ? `${dayRecs.length}筆：${ok}成功 ${fail}失敗` : (status === 'pending' ? '待執行' : '無紀錄');
+      calCells += `<div class="cal-cell cal-${status}${isToday?' cal-today':''}" title="${tip}">
+        <div class="cal-day-num">${d}</div>
+        <div class="cal-day-icon">${_calStatusIcon(status)}</div>
+      </div>`;
+    }
+
+    // ── Side panels (今日 / 昨日) ──
+    function sidePanel(label, recs) {
+      const ok   = recs.filter(r => r.status === 'success').length;
+      const fail = recs.filter(r => r.status === 'failed').length;
+      const sz   = recs.reduce((a, r) => a + (r.size_bytes || 0), 0);
+      return `<div class="card" style="padding:14px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.4px">${label}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center">
+          <div><div style="font-size:22px;font-weight:800;color:var(--text)">${recs.length}</div><div style="font-size:11px;color:var(--text2)">總計</div></div>
+          <div><div style="font-size:22px;font-weight:800;color:var(--success)">${ok}</div><div style="font-size:11px;color:var(--text2)">成功</div></div>
+          <div><div style="font-size:22px;font-weight:800;color:var(--danger)">${fail}</div><div style="font-size:11px;color:var(--text2)">失敗</div></div>
+        </div>
+        ${recs.length > 0
+          ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">總大小：${fmtSize(sz)}</div>`
+          : `<div style="font-size:12px;color:var(--text3);margin-top:6px;text-align:center">無備份紀錄</div>`}
+      </div>`;
+    }
+
+    // ── Bottom table (all active items) ──
+    const allActiveItems = [
+      ...scheds.filter(s => s.enabled).map(s => ({
+        name: s.project_name || '—', status: s.last_run_status, lastRun: s.last_run_at, nextRun: s.next_run_at,
+      })),
+      ...syls.filter(s => s.enabled).map(s => ({
+        name: s.name, status: s.run_status, lastRun: s.last_run_at, nextRun: null,
+      })),
+      ...gcpArr.filter(g => g.enabled).map(g => ({
+        name: g.name, status: g.run_status, lastRun: g.last_run_at, nextRun: null,
+      })),
+    ];
+
+    const itemRows = allActiveItems.length === 0
+      ? '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px">無啟用中的備份項目</td></tr>'
+      : allActiveItems.map(it => `<tr>
+          <td><strong>${esc(it.name)}</strong></td>
+          <td>${runStatusBadge(it.status)}</td>
+          <td style="font-size:12px;white-space:nowrap">${fmtDate(it.lastRun) || '—'}</td>
+          <td style="font-size:12px;white-space:nowrap">${it.nextRun ? fmtDate(it.nextRun) : '—'}</td>
+        </tr>`).join('');
+
+    const tc = document.getElementById('onlinesec-tab-content');
+    if (!tc) return;
+    tc.innerHTML = `
+      <div class="stat-grid" style="margin-bottom:20px">
+        <div class="stat-card c-green" style="cursor:pointer" onclick="switchOnlineSecTab('history')" title="查看歷史備份紀錄">
+          <div class="stat-label">備份總次數</div>
+          <div class="stat-value">${totalCount}</div>
+          <div class="stat-sub" style="color:var(--primary)">歷史備份紀錄 →</div>
+        </div>
+        <div class="stat-card ${failedCount>0?'c-red':'c-green'}" style="cursor:pointer" onclick="switchOnlineSecTab('history')" title="查看備份失敗紀錄">
+          <div class="stat-label">失敗總次數</div>
+          <div class="stat-value">${failedCount}</div>
+          <div class="stat-sub" style="color:var(--${failedCount>0?'danger':'success'})">備份失敗紀錄 →</div>
+        </div>
+        <div class="stat-card c-yellow">
+          <div class="stat-label">備份總大小</div>
+          <div class="stat-value">${fmtSize(totalSize)}</div>
+          <div class="stat-sub">所有歷史備份</div>
+        </div>
+        <div class="stat-card c-blue">
+          <div class="stat-label">系統日誌</div>
+          <div class="stat-value">${sylsEnabled}</div>
+          <div class="stat-sub">啟用中</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 230px;gap:16px;margin-bottom:20px;align-items:start">
+        <div class="card" style="padding:0;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <h3 style="font-size:14px;font-weight:700">${monthName} 備份狀態</h3>
+            <div style="display:flex;gap:12px;font-size:12px;color:var(--text2);flex-wrap:wrap">
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="color:var(--success);font-size:14px">✓</span>成功</span>
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="color:var(--danger);font-size:14px">✕</span>失敗</span>
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="font-size:13px">⏳</span>進行中</span>
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="font-size:12px">🔜</span>待執行</span>
+            </div>
+          </div>
+          <div style="padding:12px 14px">
+            <div class="cal-grid">
+              <div class="cal-hdr">一</div><div class="cal-hdr">二</div><div class="cal-hdr">三</div>
+              <div class="cal-hdr">四</div><div class="cal-hdr">五</div>
+              <div class="cal-hdr" style="color:var(--danger)">六</div>
+              <div class="cal-hdr" style="color:var(--danger)">日</div>
+              ${calCells}
+            </div>
+          </div>
+        </div>
+        <div>
+          ${sidePanel('今日備份統計', recordsByDay[todayStr] || [])}
+          ${sidePanel('昨日備份統計', recordsByDay[yStr] || [])}
+        </div>
+      </div>
+
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+          <h3 style="font-size:14px;font-weight:700">備份項目清單</h3>
+        </div>
+        <div class="table-wrap" style="border:none;border-radius:0">
+          <table>
+            <thead><tr><th>名稱</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
+            <tbody>${itemRows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    const tc = document.getElementById('onlinesec-tab-content');
+    if (tc) tc.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`;
+  }
+}
+
+async function renderOnlineSecHistory() {
+  try {
+    const [data, projects] = await Promise.all([
+      apiGet('/api/backups?limit=100'),
+      apiGet('/api/projects').catch(() => []),
+    ]);
+    const recs  = data.records || [];
+    const total = data.total   || 0;
+    const tc = document.getElementById('onlinesec-tab-content');
+    if (!tc) return;
+    tc.innerHTML = `
+      <div class="page-hdr" style="margin-bottom:14px">
+        <div class="page-hdr-left"><h2 style="font-size:18px;font-weight:700">歷史備份紀錄</h2><p>共 ${total} 筆</p></div>
+        <div class="page-hdr-right">
+          <button class="btn btn-sm btn-secondary" onclick="renderOnlineSecHistory()">↺ 重新整理</button>
+        </div>
+      </div>
+      ${recs.length === 0 ? '<div class="empty"><div class="empty-icon">🗂</div>尚無備份紀錄</div>' : `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>耗時</th><th>時間</th></tr></thead>
+          <tbody>${recs.map(r => `<tr>
+            <td><span class="truncate">${esc(r.project_name || '—')}</span></td>
+            <td>${typeBadge(r.type)}</td>
+            <td>${statusBadge(r.status, r.error_msg)}</td>
+            <td>${fmtSize(r.size_bytes)}</td>
+            <td>${fmtDur(r.duration_sec)}</td>
+            <td style="font-size:12px;white-space:nowrap">${fmtDate(r.created_at)}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`}
+    `;
+  } catch(e) {
+    const tc = document.getElementById('onlinesec-tab-content');
+    if (tc) tc.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`;
+  }
+}
+
+function renderOnlineSecSecurity() {
+  const tc = document.getElementById('onlinesec-tab-content');
+  if (!tc) return;
+  tc.innerHTML = `
+    <div class="page-hdr" style="margin-bottom:14px">
+      <div class="page-hdr-left">
+        <h2 style="font-size:18px;font-weight:700">季度資安弱點掃描紀錄</h2>
+        <p>定期執行的資安弱點評估與修補追蹤</p>
+      </div>
+    </div>
+    <div class="empty">
+      <div class="empty-icon">🛡️</div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:8px">尚無掃描紀錄</div>
+      <div style="font-size:13px;color:var(--text3)">功能開發中，敬請期待</div>
+    </div>
+  `;
+}
+
+function renderOnlineSecCases() {
+  const tc = document.getElementById('onlinesec-tab-content');
+  if (!tc) return;
+  tc.innerHTML = `
+    <div class="page-hdr" style="margin-bottom:14px">
+      <div class="page-hdr-left">
+        <h2 style="font-size:18px;font-weight:700">案件列表</h2>
+        <p>館方叫修需求與異常事件追蹤</p>
+      </div>
+    </div>
+    <div class="empty">
+      <div class="empty-icon">📝</div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:8px">尚無案件</div>
+      <div style="font-size:13px;color:var(--text3)">功能開發中，敬請期待</div>
+    </div>
+  `;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    Init
 ═══════════════════════════════════════════════════════════════ */
 function renderPage() {
@@ -2858,6 +3156,7 @@ function renderPage() {
   else if (currentPage === 'gcpbackup') renderGcpBackup();
   else if (currentPage === 'schedules') renderAllSchedules();
   else if (currentPage === 'capabilities') renderCapabilities();
+  else if (currentPage === 'onlinesec') renderOnlineSec();
   else renderDashboard();
 }
 
