@@ -3187,18 +3187,18 @@ async function renderOnlineSecHistory() {
       </div>
       ${recs.length === 0 ? `<div class="empty"><div class="empty-icon">🗂</div>${statusFilter?'無失敗備份紀錄':'尚無備份紀錄'}</div>` : `
       <div class="table-wrap">
-        <table>
-          <thead><tr><th>專案</th><th>類型</th><th>狀態</th><th>大小</th><th>耗時</th><th>時間</th><th></th></tr></thead>
+        <table style="table-layout:auto">
+          <thead><tr><th>專案</th><th style="white-space:nowrap">類型</th><th style="white-space:nowrap">狀態</th><th style="white-space:nowrap">大小</th><th style="white-space:nowrap">耗時</th><th style="white-space:nowrap">時間</th><th style="width:1%;white-space:nowrap"></th></tr></thead>
           <tbody>${recs.map(r => {
             if (r.error_msg) _recordErrors[r.id] = { msg: r.error_msg, projectId: r.project_id };
             return `<tr>
             <td><span class="truncate">${esc(r.project_name || '—')}</span></td>
-            <td>${typeBadge(r.type)}</td>
-            <td>${statusBadge(r.status, r.error_msg)}</td>
-            <td>${fmtSize(r.size_bytes)}</td>
-            <td>${fmtDur(r.duration_sec)}</td>
+            <td style="white-space:nowrap">${typeBadge(r.type)}</td>
+            <td style="white-space:nowrap">${statusBadge(r.status, r.error_msg)}</td>
+            <td style="white-space:nowrap">${fmtSize(r.size_bytes)}</td>
+            <td style="white-space:nowrap">${fmtDur(r.duration_sec)}</td>
             <td style="font-size:12px;white-space:nowrap">${fmtDate(r.created_at)}</td>
-            <td class="td-actions">${r.status==='failed'&&r.error_msg ? `<button class="btn btn-xs btn-danger" onclick="showRecordError(${r.id})">檢視原因</button>` : ''}</td>
+            <td style="width:1%;white-space:nowrap;text-align:right">${r.status==='failed'&&r.error_msg ? `<button class="btn btn-xs btn-danger" onclick="showRecordError(${r.id})">檢視原因</button>` : ''}</td>
           </tr>`;
           }).join('')}</tbody>
         </table>
@@ -3228,22 +3228,105 @@ function renderOnlineSecSecurity() {
   `;
 }
 
-function renderOnlineSecCases() {
+async function renderOnlineSecCases() {
   const tc = document.getElementById('onlinesec-tab-content');
   if (!tc) return;
-  tc.innerHTML = `
-    <div class="page-hdr" style="margin-bottom:14px">
-      <div class="page-hdr-left">
-        <h2 style="font-size:18px;font-weight:700">案件列表</h2>
-        <p>館方叫修需求與異常事件追蹤</p>
+  tc.innerHTML = '<div class="loading"><div class="spinner"></div>載入中...</div>';
+  try {
+    const [scheds, syslogs, gcps] = await Promise.all([
+      apiGet('/api/schedules/all'),
+      apiGet('/api/syslogs'),
+      apiGet('/api/gcpconfigs'),
+    ]);
+
+    const schedEnabled = (scheds || []).filter(s => s.enabled);
+    const sylsEnabled  = (syslogs || []).filter(s => s.enabled);
+    const gcpsEnabled  = (gcps || []).filter(g => g.enabled);
+
+    const freqLabel = freq => ({ daily:'每日', weekly:'每週', monthly:'每月', other:'自訂' }[freq] || '—');
+    const freqBadge = expr => {
+      const freq = cronFrequency(expr);
+      const colors = { daily:'#dbeafe;color:#1d4ed8', weekly:'#f0fdf4;color:#16a34a', monthly:'#f5f3ff;color:#6d28d9', other:'#fff7ed;color:#c2410c' };
+      const c = colors[freq] || 'var(--surface2);color:var(--text2)';
+      return freq ? `<span style="display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600;background:${c}">${freqLabel(freq)}</span>` : '—';
+    };
+
+    const rows = [
+      ...schedEnabled.map(s => {
+        const typeLabels = (s.target_types || []).map(t => typeBadge(t)).join(' ');
+        const name = s.project_name + (s.label ? ` / ${s.label}` : '');
+        return `<tr>
+          <td><span class="badge badge-files" style="font-size:12px">專案備份</span></td>
+          <td><strong>${esc(name)}</strong></td>
+          <td>${typeLabels || '—'}</td>
+          <td>${freqBadge(s.cron_expr)}</td>
+          <td>${runStatusBadge(s.last_run_status)}</td>
+          <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at) || '—'}</td>
+          <td style="font-size:12px;white-space:nowrap">${fmtDate(s.next_run_at) || '—'}</td>
+        </tr>`;
+      }),
+      ...sylsEnabled.map(s => `<tr>
+          <td><span class="badge badge-system" style="font-size:12px">系統日誌</span></td>
+          <td><strong>${esc(s.name)}</strong></td>
+          <td>${typeBadge('syslog')}</td>
+          <td>${freqBadge(s.cron_expr)}</td>
+          <td>${runStatusBadge(s.run_status)}</td>
+          <td style="font-size:12px;white-space:nowrap">${fmtDate(s.last_run_at) || '—'}</td>
+          <td style="font-size:12px;white-space:nowrap">${s.cron_expr ? (fmtDate(cronNextRun(s.cron_expr)) || '—') : '—'}</td>
+        </tr>`),
+      ...gcpsEnabled.map(g => `<tr>
+          <td><span class="badge badge-database" style="font-size:12px">GCP 備份</span></td>
+          <td><strong>${esc(g.name)}</strong></td>
+          <td>${typeBadge('gcp')}</td>
+          <td>${freqBadge(g.cron_expr)}</td>
+          <td>${runStatusBadge(g.run_status)}</td>
+          <td style="font-size:12px;white-space:nowrap">${fmtDate(g.last_run_at) || '—'}</td>
+          <td style="font-size:12px;white-space:nowrap">${g.cron_expr ? (fmtDate(cronNextRun(g.cron_expr)) || '—') : '—'}</td>
+        </tr>`),
+    ].join('');
+
+    const total = schedEnabled.length + sylsEnabled.length + gcpsEnabled.length;
+
+    tc.innerHTML = `
+      <div class="page-hdr" style="margin-bottom:14px">
+        <div class="page-hdr-left">
+          <h2 style="font-size:18px;font-weight:700">啟用中備份項目</h2>
+          <p>共 ${total} 個啟用中的備份工作</p>
+        </div>
+        <div class="page-hdr-right">
+          <button class="btn btn-sm btn-secondary" onclick="renderOnlineSecCases()">↺ 重新整理</button>
+        </div>
       </div>
-    </div>
-    <div class="empty">
-      <div class="empty-icon">📝</div>
-      <div style="font-size:15px;font-weight:600;margin-bottom:8px">尚無案件</div>
-      <div style="font-size:13px;color:var(--text3)">功能開發中，敬請期待</div>
-    </div>
-  `;
+      <div class="stat-grid" style="margin-bottom:18px">
+        <div class="stat-card c-blue">
+          <div class="stat-label">專案備份排程</div>
+          <div class="stat-value">${schedEnabled.length}</div>
+          <div class="stat-sub">啟用中</div>
+        </div>
+        <div class="stat-card c-yellow">
+          <div class="stat-label">系統日誌備份</div>
+          <div class="stat-value">${sylsEnabled.length}</div>
+          <div class="stat-sub">啟用中</div>
+        </div>
+        <div class="stat-card c-green">
+          <div class="stat-label">GCP 備份</div>
+          <div class="stat-value">${gcpsEnabled.length}</div>
+          <div class="stat-sub">啟用中</div>
+        </div>
+      </div>
+      ${total === 0
+        ? `<div class="empty"><div class="empty-icon">📋</div><div style="font-size:15px;font-weight:600;margin-bottom:8px">尚無啟用中的備份項目</div></div>`
+        : `<div class="table-wrap">
+            <table>
+              <thead><tr><th>類型</th><th>名稱</th><th>備份內容</th><th>頻率</th><th>上次結果</th><th>最後執行</th><th>下次執行</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`
+      }
+    `;
+  } catch(e) {
+    tc.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
