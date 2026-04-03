@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"backup-manager/internal/store"
 )
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -31,10 +33,10 @@ type DiskUsageResponse struct {
 
 // ── handlers ──────────────────────────────────────────────────────────────────
 
-func RegisterDiskUsageRoute(mux *http.ServeMux) {
+func RegisterDiskUsageRoute(mux *http.ServeMux, s *store.Store) {
 	mux.HandleFunc("GET /api/disk-usage", handleDiskUsage)
-	// 外部 API：無需 API key（系統資訊，僅供內部監控使用）
-	mux.HandleFunc("GET /api/v1/system/disk", handleDiskUsage)
+	// 外部 API：需要 sys_ 前綴的系統 API Key
+	mux.HandleFunc("GET /api/v1/system/disk", systemKeyAuth(s, handleDiskUsage))
 }
 
 // HandleDiskUsageDirect 供 agent GET /disk-usage 路由使用（在 host 上執行）

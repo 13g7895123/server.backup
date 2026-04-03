@@ -652,6 +652,82 @@ func (s *Store) ValidateSyslogAPIKey(ctx context.Context, keyHash string) (int, 
 	return syslogID, nil
 }
 
+// ── System API Keys ───────────────────────────────────────────────────────────
+
+// SystemAPIKey 對應 system_api_keys 表（不含 key_hash）
+type SystemAPIKey struct {
+	ID          int        `json:"id"`
+	Name        string     `json:"name"`
+	KeyPrefix   string     `json:"key_prefix"`
+	Enabled     bool       `json:"enabled"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+func (s *Store) ListSystemAPIKeys(ctx context.Context) ([]SystemAPIKey, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, name, key_prefix, enabled, last_used_at, expires_at, created_at
+		FROM system_api_keys
+		ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []SystemAPIKey
+	for rows.Next() {
+		var k SystemAPIKey
+		if err := rows.Scan(&k.ID, &k.Name, &k.KeyPrefix, &k.Enabled,
+			&k.LastUsedAt, &k.ExpiresAt, &k.CreatedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+func (s *Store) CreateSystemAPIKey(ctx context.Context, name, keyHash, keyPrefix string, expiresAt *time.Time) (*SystemAPIKey, error) {
+	var k SystemAPIKey
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO system_api_keys (name, key_hash, key_prefix, expires_at)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, name, key_prefix, enabled, last_used_at, expires_at, created_at`,
+		name, keyHash, keyPrefix, expiresAt).
+		Scan(&k.ID, &k.Name, &k.KeyPrefix, &k.Enabled,
+			&k.LastUsedAt, &k.ExpiresAt, &k.CreatedAt)
+	return &k, err
+}
+
+func (s *Store) RevokeSystemAPIKey(ctx context.Context, id int) error {
+	_, err := s.pool.Exec(ctx, `UPDATE system_api_keys SET enabled=false WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) DeleteSystemAPIKey(ctx context.Context, id int) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM system_api_keys WHERE id=$1`, id)
+	return err
+}
+
+// ValidateSystemAPIKey 驗證 system key，有效時回傳 nil
+func (s *Store) ValidateSystemAPIKey(ctx context.Context, keyHash string) error {
+	var enabled bool
+	var expiresAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT enabled, expires_at FROM system_api_keys WHERE key_hash=$1`, keyHash).
+		Scan(&enabled, &expiresAt)
+	if err != nil {
+		return fmt.Errorf("invalid key")
+	}
+	if !enabled {
+		return fmt.Errorf("key disabled")
+	}
+	if expiresAt != nil && time.Now().After(*expiresAt) {
+		return fmt.Errorf("key expired")
+	}
+	go s.pool.Exec(ctx, `UPDATE system_api_keys SET last_used_at=NOW() WHERE key_hash=$1`, keyHash) //nolint
+	return nil
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 func (s *Store) Summary(ctx context.Context) ([]ProjectSummary, error) {

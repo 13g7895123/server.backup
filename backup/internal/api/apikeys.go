@@ -59,6 +59,12 @@ func RegisterAPIKeyRoutes(mux *http.ServeMux, s *store.Store) {
 	mux.HandleFunc("DELETE /api/admin/syslog-api-keys/{kid}", h.syslogDelete)
 	mux.HandleFunc("PATCH /api/admin/syslog-api-keys/{kid}/revoke", h.syslogRevoke)
 
+	// 管理介面用（system key）
+	mux.HandleFunc("GET /api/admin/system-api-keys", h.systemList)
+	mux.HandleFunc("POST /api/admin/system-api-keys", h.systemCreate)
+	mux.HandleFunc("DELETE /api/admin/system-api-keys/{kid}", h.systemDelete)
+	mux.HandleFunc("PATCH /api/admin/system-api-keys/{kid}/revoke", h.systemRevoke)
+
 	// 對外資料 API（專案 key）
 	mux.HandleFunc("GET /api/v1/project/overview", apiKeyAuth(s, projectOverview(s)))
 	mux.HandleFunc("GET /api/v1/project/targets", apiKeyAuth(s, projectTargets(s)))
@@ -483,6 +489,121 @@ func syslogRecords(s *store.Store) func(http.ResponseWriter, *http.Request, int)
 			"offset":  offset,
 		})
 	}
+}
+
+// ── System Key 中介層 ─────────────────────────────────────────────────────────
+
+// systemKeyAuth 驗證 sys_ 前綴的系統 API key，適用於 /api/v1/system/* 路由
+func systemKeyAuth(s *store.Store, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		raw := ""
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			raw = strings.TrimPrefix(auth, "Bearer ")
+		} else {
+			raw = r.URL.Query().Get("api_key")
+		}
+		if raw == "" {
+			writeError(w, http.StatusUnauthorized, "缺少 API Key（請使用 Authorization: Bearer <key> 或 ?api_key=<key>）")
+			return
+		}
+		hash := hashKey(raw)
+		if err := s.ValidateSystemAPIKey(r.Context(), hash); err != nil {
+			writeError(w, http.StatusUnauthorized, "API Key 無效或已失效")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// ── System Key 管理 Handler ───────────────────────────────────────────────────
+
+// GET /api/admin/system-api-keys
+func (h *apiKeyHandler) systemList(w http.ResponseWriter, r *http.Request) {
+	keys, err := h.store.ListSystemAPIKeys(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if keys == nil {
+		keys = []store.SystemAPIKey{}
+	}
+	writeJSON(w, http.StatusOK, keys)
+}
+
+// POST /api/admin/system-api-keys
+func (h *apiKeyHandler) systemCreate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name      string  `json:"name"`
+		ExpiresIn *string `json:"expires_in"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 JSON")
+		return
+	}
+	if strings.TrimSpace(body.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name 不可為空")
+		return
+	}
+	rawBytes := make([]byte, 32)
+	if _, err := rand.Read(rawBytes); err != nil {
+		writeError(w, http.StatusInternalServerError, "key 生成失敗")
+		return
+	}
+	rawKey := "sys_" + hex.EncodeToString(rawBytes)
+	keyHash := hashKey(rawKey)
+	keyPrefix := rawKey[:8]
+	var expiresAt *time.Time
+	if body.ExpiresIn != nil && *body.ExpiresIn != "" {
+		d, err := parseDuration(*body.ExpiresIn)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "無效的 expires_in（支援 30d / 90d / 365d）")
+			return
+		}
+		t := time.Now().Add(d)
+		expiresAt = &t
+	}
+	k, err := h.store.CreateSystemAPIKey(r.Context(), body.Name, keyHash, keyPrefix, expiresAt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":         k.ID,
+		"name":       k.Name,
+		"key":        rawKey,
+		"key_prefix": k.KeyPrefix,
+		"enabled":    k.Enabled,
+		"expires_at": k.ExpiresAt,
+		"created_at": k.CreatedAt,
+	})
+}
+
+// PATCH /api/admin/system-api-keys/{kid}/revoke
+func (h *apiKeyHandler) systemRevoke(w http.ResponseWriter, r *http.Request) {
+	kid, err := strconv.Atoi(r.PathValue("kid"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 key id")
+		return
+	}
+	if err := h.store.RevokeSystemAPIKey(r.Context(), kid); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+}
+
+// DELETE /api/admin/system-api-keys/{kid}
+func (h *apiKeyHandler) systemDelete(w http.ResponseWriter, r *http.Request) {
+	kid, err := strconv.Atoi(r.PathValue("kid"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "無效的 key id")
+		return
+	}
+	if err := h.store.DeleteSystemAPIKey(r.Context(), kid); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ── 工具函式 ──────────────────────────────────────────────────────────────────

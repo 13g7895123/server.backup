@@ -3592,12 +3592,28 @@ function renderAdmin() {
       </div>
     </div>
     <div class="card sg">
+      <div class="card-title">系統磁碟 API Key 管理</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
+        產生 API Key 讓外部監控系統（如 Grafana、Prometheus）查詢磁碟使用狀況（<code>/api/v1/system/disk</code>）。
+      </p>
+      <div class="flex-c" style="margin-bottom:12px">
+        <button class="btn btn-sm btn-primary ml-a" onclick="showCreateSystemKey()">＋ 產生新 Key</button>
+      </div>
+      <div id="sysk-table"><div class="loading"><div class="spinner"></div>載入中...</div></div>
+      <div style="margin-top:18px;padding:14px 16px;background:var(--surface2);border-radius:var(--radius);font-size:13px;color:var(--text2);line-height:1.8">
+        <b>使用方式</b><br>
+        在 HTTP 請求加上 <code>Authorization: Bearer &lt;key&gt;</code>，或在 URL 加上 <code>?api_key=&lt;key&gt;</code><br>
+        <b>可用端點：</b><br>
+        <code>GET /api/v1/system/disk</code> — 磁碟分割區使用狀況（filesystem / mount point / used % / GB）
+      </div>
+    </div>
+    <div class="card sg">
       <div class="card-title">設定</div>
       <div style="display:flex;flex-direction:column;gap:0">
         <div style="padding:14px 0;border-bottom:1px solid var(--border)">
           <div style="font-weight:600;font-size:14px;margin-bottom:4px">API Key 前綴規則</div>
           <div style="font-size:13px;color:var(--text2)">
-            專案 Key 以 <code>bak_</code> 開頭；系統日誌 Key 以 <code>bsl_</code> 開頭，兩者可由前綴區分來源。
+            專案 Key 以 <code>bak_</code> 開頭；系統日誌 Key 以 <code>bsl_</code> 開頭；系統磁碟 Key 以 <code>sys_</code> 開頭，三者可由前綴區分來源。
           </div>
         </div>
         <div style="padding:14px 0;border-bottom:1px solid var(--border)">
@@ -3617,6 +3633,8 @@ function renderAdmin() {
   `);
   // 載入磁碟狀況
   loadDiskUsage();
+  // 載入系統 API Key 清單
+  loadSystemAPIKeys();
   // 載入專案下拉
   apiGet('/api/projects').then(projects => {
     const sel = document.getElementById('ak-project-sel');
@@ -3886,6 +3904,72 @@ async function deleteSyslogKey(kid) {
     await apiDelete(`/api/admin/syslog-api-keys/${kid}`);
     toast('已刪除', 'success');
     refreshSyslogKeyTable();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── System API Key ────────────────────────────────
+
+async function loadSystemAPIKeys() {
+  const el = document.getElementById('sysk-table');
+  if (!el) return;
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>載入中...</div>';
+  try {
+    const keys = await apiGet('/api/admin/system-api-keys');
+    if (!keys || keys.length === 0) {
+      el.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-icon">🔑</div>尚未建立任何系統 API Key</div>';
+      return;
+    }
+    el.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>名稱</th><th>Key 前綴</th><th>狀態</th><th>過期時間</th><th>最後使用</th><th>建立時間</th><th style="text-align:right">操作</th></tr></thead>
+          <tbody>${keys.map(k => `<tr>
+            <td style="font-weight:500">${esc(k.name)}</td>
+            <td><code style="font-size:13px">${esc(k.key_prefix)}…</code></td>
+            <td><span class="badge ${k.enabled ? 'badge-on' : 'badge-off'}">${k.enabled ? '有效' : '已撤銷'}</span></td>
+            <td style="font-size:13px">${k.expires_at ? fmtDate(k.expires_at) : '<span style="color:var(--text3)">永不過期</span>'}</td>
+            <td style="font-size:13px">${k.last_used_at ? fmtDate(k.last_used_at) : '<span style="color:var(--text3)">從未使用</span>'}</td>
+            <td style="font-size:13px">${fmtDate(k.created_at)}</td>
+            <td style="text-align:right">
+              ${k.enabled ? `<button class="btn btn-xs btn-ghost" onclick="revokeSystemKey(${k.id})">撤銷</button>` : ''}
+              <button class="btn btn-xs btn-danger" onclick="deleteSystemKey(${k.id})">刪除</button>
+            </td>
+          </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div>${esc(e.message||'載入失敗')}</div>`;
+  }
+}
+
+function showCreateSystemKey() {
+  const name = prompt('API Key 名稱（用途描述，例：Grafana 監控）');
+  if (!name || !name.trim()) return;
+  const exp = prompt('有效期限（輸入 30d / 90d / 365d，或留空表示永不過期）', '');
+  const body = { name: name.trim() };
+  if (exp && exp.trim()) body.expires_in = exp.trim();
+  apiPost('/api/admin/system-api-keys', body).then(k => {
+    alert(`API Key 建立成功！\n\n請立即複製，之後無法再查看：\n\n${k.key}`);
+    loadSystemAPIKeys();
+  }).catch(e => alert('建立失敗：' + (e.message || e)));
+}
+
+async function revokeSystemKey(kid) {
+  if (!confirm('確定要撤銷此 API Key？撤銷後將無法使用。')) return;
+  try {
+    await apiPatch(`/api/admin/system-api-keys/${kid}/revoke`, {});
+    toast('已撤銷', 'success');
+    loadSystemAPIKeys();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteSystemKey(kid) {
+  if (!confirm('確定要刪除此 API Key？刪除後無法復原。')) return;
+  try {
+    await apiDelete(`/api/admin/system-api-keys/${kid}`);
+    toast('已刪除', 'success');
+    loadSystemAPIKeys();
   } catch(e) { toast(e.message, 'error'); }
 }
 
