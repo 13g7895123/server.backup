@@ -3504,7 +3504,192 @@ function renderAdmin() {
         </div>
       </div>
     </div>
+    <div class="card sg">
+      <div class="card-title">開發工具</div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2)">
+          <div>
+            <div style="font-weight:600;font-size:15px;margin-bottom:3px">API 文件（Swagger UI）</div>
+            <div style="font-size:13px;color:var(--text2)">查看完整 REST API 規格，支援直接在頁面測試串接</div>
+          </div>
+          <a href="/api-docs.html" target="_blank" class="btn btn-secondary">📚 開啟文件</a>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2)">
+          <div>
+            <div style="font-weight:600;font-size:15px;margin-bottom:3px">OpenAPI JSON 規格檔</div>
+            <div style="font-size:13px;color:var(--text2)">下載原始 OpenAPI 3.0 規格，可匯入 Postman、Insomnia 等工具</div>
+          </div>
+          <a href="/openapi.json" target="_blank" class="btn btn-secondary">⬇ 下載 JSON</a>
+        </div>
+      </div>
+    </div>
+    <div class="card sg">
+      <div class="card-title">專案 API Key 管理</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
+        為指定專案產生 API Key，外部系統可使用 Key 存取該專案的備份資料（<code>/api/v1/project/*</code>）。
+      </p>
+      <div class="form-row" style="margin-bottom:14px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">選擇專案</label>
+          <select id="ak-project-sel" class="form-input" onchange="loadAdminAPIKeys(this.value)">
+            <option value="">— 請選擇 —</option>
+          </select>
+        </div>
+      </div>
+      <div id="ak-panel" style="display:none">
+        <div class="flex-c" style="margin-bottom:12px">
+          <span style="font-weight:600;font-size:14px" id="ak-proj-label"></span>
+          <button class="btn btn-sm btn-primary ml-a" onclick="showCreateAPIKey()">＋ 產生新 Key</button>
+        </div>
+        <div id="ak-table"></div>
+        <div style="margin-top:18px;padding:14px 16px;background:var(--surface2);border-radius:var(--radius);font-size:13px;color:var(--text2);line-height:1.8">
+          <b>使用方式</b><br>
+          在 HTTP 請求加上 <code>Authorization: Bearer &lt;key&gt;</code>，或在 URL 加上 <code>?api_key=&lt;key&gt;</code><br>
+          <b>可用端點：</b><br>
+          <code>GET /api/v1/project/overview</code> — 專案總覽（含最近備份）<br>
+          <code>GET /api/v1/project/targets</code> — 備份目標清單<br>
+          <code>GET /api/v1/project/schedules</code> — 排程清單<br>
+          <code>GET /api/v1/project/retention</code> — 保留政策<br>
+          <code>GET /api/v1/project/backups</code> — 備份紀錄（支援 <code>?limit=&offset=&type=&status=</code>）
+        </div>
+      </div>
+    </div>
   `);
+  // 載入專案下拉
+  apiGet('/api/projects').then(projects => {
+    const sel = document.getElementById('ak-project-sel');
+    if (!sel) return;
+    (projects || []).forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.name;
+      sel.appendChild(o);
+    });
+  }).catch(() => {});
+}
+
+let _akProjectId = null;
+let _akProjectName = '';
+
+async function loadAdminAPIKeys(projId) {
+  _akProjectId = projId ? parseInt(projId) : null;
+  const panel = document.getElementById('ak-panel');
+  if (!panel) return;
+  if (!_akProjectId) { panel.style.display = 'none'; return; }
+
+  const sel = document.getElementById('ak-project-sel');
+  _akProjectName = sel.options[sel.selectedIndex]?.textContent || '';
+  document.getElementById('ak-proj-label').textContent = `專案：${_akProjectName}`;
+  panel.style.display = '';
+
+  await refreshAPIKeyTable();
+}
+
+async function refreshAPIKeyTable() {
+  if (!_akProjectId) return;
+  const el = document.getElementById('ak-table');
+  if (!el) return;
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>載入中...</div>';
+  try {
+    const keys = await apiGet(`/api/admin/projects/${_akProjectId}/api-keys`);
+    if (!keys || keys.length === 0) {
+      el.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-icon">🔑</div>尚未建立任何 API Key</div>';
+      return;
+    }
+    el.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>名稱</th><th>Key 前綴</th><th>狀態</th><th>過期時間</th><th>最後使用</th><th>建立時間</th><th style="text-align:right">操作</th></tr></thead>
+          <tbody>${keys.map(k => `<tr>
+            <td style="font-weight:500">${esc(k.name)}</td>
+            <td><code style="font-size:13px">${esc(k.key_prefix)}…</code></td>
+            <td><span class="badge ${k.enabled ? 'badge-on' : 'badge-off'}">${k.enabled ? '有效' : '已撤銷'}</span></td>
+            <td style="font-size:13px">${k.expires_at ? fmtDate(k.expires_at) : '<span style="color:var(--text3)">永不過期</span>'}</td>
+            <td style="font-size:13px">${fmtDate(k.last_used_at)}</td>
+            <td style="font-size:13px">${fmtDate(k.created_at)}</td>
+            <td class="td-actions">
+              ${k.enabled ? `<button class="btn btn-xs btn-ghost" onclick="revokeAPIKey(${k.id})">撤銷</button>` : ''}
+              <button class="btn btn-xs btn-danger" onclick="deleteAPIKey(${k.id})">刪除</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+  } catch(e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+function showCreateAPIKey() {
+  openModal('產生新 API Key', `
+    <div class="form-group">
+      <label class="form-label">Key 名稱 <span style="color:var(--danger)">*</span></label>
+      <input id="ak-name" class="form-input" placeholder="例：監控系統、CI/CD 流程">
+      <div class="form-hint">方便識別此 Key 的用途</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">有效期限</label>
+      <select id="ak-exp" class="form-input">
+        <option value="">永不過期</option>
+        <option value="30d">30 天</option>
+        <option value="90d">90 天</option>
+        <option value="365d">365 天</option>
+      </select>
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitCreateAPIKey()">產生</button>
+  `);
+}
+
+async function submitCreateAPIKey() {
+  const name = document.getElementById('ak-name')?.value.trim();
+  const exp  = document.getElementById('ak-exp')?.value;
+  if (!name) { toast('請填寫 Key 名稱', 'warning'); return; }
+  try {
+    const res = await apiPost(`/api/admin/projects/${_akProjectId}/api-keys`, {
+      name,
+      expires_in: exp || null,
+    });
+    closeModal();
+    // 顯示一次性 Key
+    openModal('⚠️ 請複製並保存此 Key', `
+      <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius);padding:14px;margin-bottom:14px;font-size:13px;color:var(--warning)">
+        此 Key 只顯示一次，關閉後無法再查看！
+      </div>
+      <div class="form-group">
+        <label class="form-label">API Key</label>
+        <div style="display:flex;gap:8px">
+          <input id="ak-show" class="form-input mono" value="${esc(res.key)}" readonly style="font-size:13px">
+          <button class="btn btn-secondary" onclick="copyAPIKey()">複製</button>
+        </div>
+      </div>
+      <div style="font-size:13px;color:var(--text2);margin-top:8px">
+        使用方式：<code>Authorization: Bearer ${esc(res.key)}</code>
+      </div>
+    `, `<button class="btn btn-primary" onclick="closeModal();refreshAPIKeyTable()">我已複製，關閉</button>`);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function copyAPIKey() {
+  const el = document.getElementById('ak-show');
+  if (!el) return;
+  navigator.clipboard.writeText(el.value).then(() => toast('已複製', 'success'));
+}
+
+async function revokeAPIKey(kid) {
+  if (!confirm('確定要撤銷此 Key？撤銷後無法使用，但可刪除後重建。')) return;
+  try {
+    await apiPatch(`/api/admin/api-keys/${kid}/revoke`, {});
+    toast('已撤銷', 'success');
+    refreshAPIKeyTable();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteAPIKey(kid) {
+  if (!confirm('確定要刪除此 Key？此操作無法還原。')) return;
+  try {
+    await apiDelete(`/api/admin/api-keys/${kid}`);
+    toast('已刪除', 'success');
+    refreshAPIKeyTable();
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 async function adminExportAll() {
