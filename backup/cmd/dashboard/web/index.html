@@ -3554,6 +3554,57 @@ function renderAdmin() {
         </div>
       </div>
     </div>
+    <div class="card sg">
+      <div class="card-title">系統日誌 API Key 管理</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
+        為指定系統日誌設定產生 API Key，外部系統可使用 Key 查詢該日誌的備份資訊（<code>/api/v1/syslog/*</code>）。
+      </p>
+      <div class="form-row" style="margin-bottom:14px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">選擇系統日誌</label>
+          <select id="sk-syslog-sel" class="form-input" onchange="loadAdminSyslogKeys(this.value)">
+            <option value="">— 請選擇 —</option>
+          </select>
+        </div>
+      </div>
+      <div id="sk-panel" style="display:none">
+        <div class="flex-c" style="margin-bottom:12px">
+          <span style="font-weight:600;font-size:14px" id="sk-syslog-label"></span>
+          <button class="btn btn-sm btn-primary ml-a" onclick="showCreateSyslogKey()">＋ 產生新 Key</button>
+        </div>
+        <div id="sk-table"></div>
+        <div style="margin-top:18px;padding:14px 16px;background:var(--surface2);border-radius:var(--radius);font-size:13px;color:var(--text2);line-height:1.8">
+          <b>使用方式</b><br>
+          在 HTTP 請求加上 <code>Authorization: Bearer &lt;key&gt;</code>，或在 URL 加上 <code>?api_key=&lt;key&gt;</code><br>
+          <b>可用端點：</b><br>
+          <code>GET /api/v1/syslog/info</code> — 系統日誌設定資訊與最後執行狀態<br>
+          <code>GET /api/v1/syslog/records</code> — 備份執行紀錄（支援 <code>?limit=&offset=</code>）
+        </div>
+      </div>
+    </div>
+    <div class="card sg">
+      <div class="card-title">設定</div>
+      <div style="display:flex;flex-direction:column;gap:0">
+        <div style="padding:14px 0;border-bottom:1px solid var(--border)">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">API Key 前綴規則</div>
+          <div style="font-size:13px;color:var(--text2)">
+            專案 Key 以 <code>bak_</code> 開頭；系統日誌 Key 以 <code>bsl_</code> 開頭，兩者可由前綴區分來源。
+          </div>
+        </div>
+        <div style="padding:14px 0;border-bottom:1px solid var(--border)">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">Key 安全性</div>
+          <div style="font-size:13px;color:var(--text2)">
+            系統僅儲存 Key 的 SHA-256 雜湊值，明文只在建立當下顯示一次。建議搭配 HTTPS 使用，並在不需要時立即撤銷 Key。
+          </div>
+        </div>
+        <div style="padding:14px 0">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">有效期限選項</div>
+          <div style="font-size:13px;color:var(--text2)">
+            可設定 30 天、90 天、365 天，或永不過期。建議對長期整合使用設定過期日，定期輪換 Key。
+          </div>
+        </div>
+      </div>
+    </div>
   `);
   // 載入專案下拉
   apiGet('/api/projects').then(projects => {
@@ -3563,6 +3614,17 @@ function renderAdmin() {
       const o = document.createElement('option');
       o.value = p.id;
       o.textContent = p.name;
+      sel.appendChild(o);
+    });
+  }).catch(() => {});
+  // 載入系統日誌下拉
+  apiGet('/api/syslogs').then(syslogs => {
+    const sel = document.getElementById('sk-syslog-sel');
+    if (!sel) return;
+    (syslogs || []).forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.id;
+      o.textContent = s.name || s.identifier || `ID ${s.id}`;
       sel.appendChild(o);
     });
   }).catch(() => {});
@@ -3689,6 +3751,130 @@ async function deleteAPIKey(kid) {
     await apiDelete(`/api/admin/api-keys/${kid}`);
     toast('已刪除', 'success');
     refreshAPIKeyTable();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── 系統日誌 API Key ──────────────────────────────
+let _skSyslogId   = null;
+let _skSyslogName = '';
+
+async function loadAdminSyslogKeys(syslogId) {
+  _skSyslogId = syslogId ? parseInt(syslogId) : null;
+  const panel = document.getElementById('sk-panel');
+  if (!panel) return;
+  if (!_skSyslogId) { panel.style.display = 'none'; return; }
+
+  const sel = document.getElementById('sk-syslog-sel');
+  _skSyslogName = sel.options[sel.selectedIndex]?.textContent || '';
+  document.getElementById('sk-syslog-label').textContent = `系統日誌：${_skSyslogName}`;
+  panel.style.display = '';
+
+  await refreshSyslogKeyTable();
+}
+
+async function refreshSyslogKeyTable() {
+  if (!_skSyslogId) return;
+  const el = document.getElementById('sk-table');
+  if (!el) return;
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>載入中...</div>';
+  try {
+    const keys = await apiGet(`/api/admin/syslogs/${_skSyslogId}/api-keys`);
+    if (!keys || keys.length === 0) {
+      el.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-icon">🔑</div>尚未建立任何 API Key</div>';
+      return;
+    }
+    el.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>名稱</th><th>Key 前綴</th><th>狀態</th><th>過期時間</th><th>最後使用</th><th>建立時間</th><th style="text-align:right">操作</th></tr></thead>
+          <tbody>${keys.map(k => `<tr>
+            <td style="font-weight:500">${esc(k.name)}</td>
+            <td><code style="font-size:13px">${esc(k.key_prefix)}…</code></td>
+            <td><span class="badge ${k.enabled ? 'badge-on' : 'badge-off'}">${k.enabled ? '有效' : '已撤銷'}</span></td>
+            <td style="font-size:13px">${k.expires_at ? fmtDate(k.expires_at) : '<span style="color:var(--text3)">永不過期</span>'}</td>
+            <td style="font-size:13px">${fmtDate(k.last_used_at)}</td>
+            <td style="font-size:13px">${fmtDate(k.created_at)}</td>
+            <td class="td-actions">
+              ${k.enabled ? `<button class="btn btn-xs btn-ghost" onclick="revokeSyslogKey(${k.id})">撤銷</button>` : ''}
+              <button class="btn btn-xs btn-danger" onclick="deleteSyslogKey(${k.id})">刪除</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+  } catch(e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+function showCreateSyslogKey() {
+  openModal('產生新系統日誌 API Key', `
+    <div class="form-group">
+      <label class="form-label">Key 名稱 <span style="color:var(--danger)">*</span></label>
+      <input id="sk-name" class="form-input" placeholder="例：監控系統、日誌收集器">
+      <div class="form-hint">方便識別此 Key 的用途</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">有效期限</label>
+      <select id="sk-exp" class="form-input">
+        <option value="">永不過期</option>
+        <option value="30d">30 天</option>
+        <option value="90d">90 天</option>
+        <option value="365d">365 天</option>
+      </select>
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitCreateSyslogKey()">產生</button>
+  `);
+}
+
+async function submitCreateSyslogKey() {
+  const name = document.getElementById('sk-name')?.value.trim();
+  const exp  = document.getElementById('sk-exp')?.value;
+  if (!name) { toast('請填寫 Key 名稱', 'warning'); return; }
+  try {
+    const res = await apiPost(`/api/admin/syslogs/${_skSyslogId}/api-keys`, {
+      name,
+      expires_in: exp || null,
+    });
+    closeModal();
+    openModal('⚠️ 請複製並保存此 Key', `
+      <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius);padding:14px;margin-bottom:14px;font-size:13px;color:var(--warning)">
+        此 Key 只顯示一次，關閉後無法再查看！
+      </div>
+      <div class="form-group">
+        <label class="form-label">API Key</label>
+        <div style="display:flex;gap:8px">
+          <input id="sk-show" class="form-input mono" value="${esc(res.key)}" readonly style="font-size:13px">
+          <button class="btn btn-secondary" onclick="copySyslogKey()">複製</button>
+        </div>
+      </div>
+      <div style="font-size:13px;color:var(--text2);margin-top:8px">
+        使用方式：<code>Authorization: Bearer ${esc(res.key)}</code>
+      </div>
+    `, `<button class="btn btn-primary" onclick="closeModal();refreshSyslogKeyTable()">我已複製，關閉</button>`);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function copySyslogKey() {
+  const el = document.getElementById('sk-show');
+  if (!el) return;
+  navigator.clipboard.writeText(el.value).then(() => toast('已複製', 'success'));
+}
+
+async function revokeSyslogKey(kid) {
+  if (!confirm('確定要撤銷此 Key？撤銷後無法使用，但可刪除後重建。')) return;
+  try {
+    await apiPatch(`/api/admin/syslog-api-keys/${kid}/revoke`, {});
+    toast('已撤銷', 'success');
+    refreshSyslogKeyTable();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteSyslogKey(kid) {
+  if (!confirm('確定要刪除此 Key？此操作無法還原。')) return;
+  try {
+    await apiDelete(`/api/admin/syslog-api-keys/${kid}`);
+    toast('已刪除', 'success');
+    refreshSyslogKeyTable();
   } catch(e) { toast(e.message, 'error'); }
 }
 

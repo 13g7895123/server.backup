@@ -570,6 +570,88 @@ func (s *Store) ValidateAPIKey(ctx context.Context, keyHash string) (int, error)
 	return projectID, nil
 }
 
+// ── Syslog API Keys ───────────────────────────────────────────────────────────
+
+// SyslogAPIKey 對應 syslog_api_keys 表
+type SyslogAPIKey struct {
+	ID          int        `json:"id"`
+	SyslogID    int        `json:"syslog_id"`
+	SyslogName  string     `json:"syslog_name,omitempty"`
+	Name        string     `json:"name"`
+	KeyPrefix   string     `json:"key_prefix"`
+	Enabled     bool       `json:"enabled"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+func (s *Store) ListSyslogAPIKeys(ctx context.Context, syslogID int) ([]SyslogAPIKey, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT k.id, k.syslog_id, c.name, k.name, k.key_prefix, k.enabled,
+		       k.last_used_at, k.expires_at, k.created_at
+		FROM syslog_api_keys k
+		JOIN syslog_configs c ON c.id = k.syslog_id
+		WHERE k.syslog_id = $1
+		ORDER BY k.id DESC`, syslogID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []SyslogAPIKey
+	for rows.Next() {
+		var k SyslogAPIKey
+		if err := rows.Scan(&k.ID, &k.SyslogID, &k.SyslogName, &k.Name,
+			&k.KeyPrefix, &k.Enabled, &k.LastUsedAt, &k.ExpiresAt, &k.CreatedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+func (s *Store) CreateSyslogAPIKey(ctx context.Context, syslogID int, name, keyHash, keyPrefix string, expiresAt *time.Time) (*SyslogAPIKey, error) {
+	var k SyslogAPIKey
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO syslog_api_keys (syslog_id, name, key_hash, key_prefix, expires_at)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, syslog_id, name, key_prefix, enabled, last_used_at, expires_at, created_at`,
+		syslogID, name, keyHash, keyPrefix, expiresAt).
+		Scan(&k.ID, &k.SyslogID, &k.Name, &k.KeyPrefix,
+			&k.Enabled, &k.LastUsedAt, &k.ExpiresAt, &k.CreatedAt)
+	return &k, err
+}
+
+func (s *Store) RevokeSyslogAPIKey(ctx context.Context, id int) error {
+	_, err := s.pool.Exec(ctx, `UPDATE syslog_api_keys SET enabled=false WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) DeleteSyslogAPIKey(ctx context.Context, id int) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM syslog_api_keys WHERE id=$1`, id)
+	return err
+}
+
+// ValidateSyslogAPIKey 驗證 syslog key，回傳所屬 syslog_id
+func (s *Store) ValidateSyslogAPIKey(ctx context.Context, keyHash string) (int, error) {
+	var syslogID int
+	var enabled bool
+	var expiresAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT syslog_id, enabled, expires_at FROM syslog_api_keys WHERE key_hash=$1`, keyHash).
+		Scan(&syslogID, &enabled, &expiresAt)
+	if err != nil {
+		return 0, fmt.Errorf("invalid key")
+	}
+	if !enabled {
+		return 0, fmt.Errorf("key disabled")
+	}
+	if expiresAt != nil && time.Now().After(*expiresAt) {
+		return 0, fmt.Errorf("key expired")
+	}
+	go s.pool.Exec(ctx, `UPDATE syslog_api_keys SET last_used_at=NOW() WHERE key_hash=$1`, keyHash) //nolint
+	return syslogID, nil
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 func (s *Store) Summary(ctx context.Context) ([]ProjectSummary, error) {
