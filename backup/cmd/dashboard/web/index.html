@@ -199,8 +199,8 @@ select.form-input{width:auto}
       <div class="nav-item" data-p="schedules"><span class="ni">🗓</span>排程管理</div>
       <div class="nav-section">系統</div>
       <div class="nav-item" data-p="capabilities"><span class="ni">⚙️</span>系統功能</div>
-      <div class="nav-section">管理</div>
-      <div class="nav-item" data-p="admin"><span class="ni">🔧</span>系統管理</div>
+      <div class="nav-section" id="nav-admin-section" style="display:none">管理</div>
+      <div class="nav-item" id="nav-admin-item" data-p="admin" style="display:none"><span class="ni">🔧</span>系統管理</div>
     </nav>
   </aside>
   <div class="main">
@@ -3722,6 +3722,13 @@ async function checkHealth() {
 
 // Parse initial hash
 (function init() {
+  // ?admin=1 才顯示管理側邊欄
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('admin') === '1') {
+    document.getElementById('nav-admin-section').style.display = '';
+    document.getElementById('nav-admin-item').style.display = '';
+  }
+
   const hash = window.location.hash.replace('#','');
   if (hash.startsWith('project/')) {
     const id = parseInt(hash.split('/')[1]);
