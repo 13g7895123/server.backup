@@ -323,17 +323,18 @@ func (h *syslogHandler) run(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered", "message": "日誌備份已開始"})
 	go func() {
 		var msg string
+		var size int64
 		var runErr error
 
 		// journal 類型且有 AGENT_URL → 委派給 agent（agent 在 host 有 journalctl）
 		if c.SourceType == "journal" {
 			if agentURL := os.Getenv("AGENT_URL"); agentURL != "" {
-				msg, runErr = proxySyslogRun(agentURL, c)
+				msg, size, runErr = proxySyslogRun(agentURL, c)
 			} else {
-				msg, runErr = executeSyslogBackup(c)
+				msg, size, runErr = executeSyslogBackup(c)
 			}
 		} else {
-			msg, runErr = executeSyslogBackup(c)
+			msg, size, runErr = executeSyslogBackup(c)
 		}
 		status := "success"
 		errStr := ""
@@ -353,6 +354,7 @@ func (h *syslogHandler) run(w http.ResponseWriter, r *http.Request) {
 		if recID > 0 {
 			rec.ID = recID
 			rec.Status = status
+			rec.SizeBytes = size
 			rec.DurationSec = time.Since(start).Seconds()
 			rec.ErrorMsg = errStr
 			h.store.UpdateRecord(context.Background(), rec) //nolint
@@ -479,12 +481,12 @@ func (h *syslogHandler) test(w http.ResponseWriter, r *http.Request) {
 // ── Agent proxy helpers ───────────────────────────────────────────────────────
 
 // proxySyslogRun 將 journal 備份委派給 agent 執行（agent 在 host 上有 journalctl）
-func proxySyslogRun(agentURL string, c SyslogConfig) (string, error) {
+func proxySyslogRun(agentURL string, c SyslogConfig) (string, int64, error) {
 	body, _ := json.Marshal(c)
 	agentToken := os.Getenv("AGENT_TOKEN")
 	req, err := http.NewRequest("POST", agentURL+"/syslogs/run", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("建立 agent 請求失敗: %w", err)
+		return "", 0, fmt.Errorf("建立 agent 請求失敗: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if agentToken != "" {
@@ -492,20 +494,21 @@ func proxySyslogRun(agentURL string, c SyslogConfig) (string, error) {
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("無法連線 agent: %w", err)
+		return "", 0, fmt.Errorf("無法連線 agent: %w", err)
 	}
 	defer resp.Body.Close()
 	var result struct {
-		OK  bool   `json:"ok"`
-		Msg string `json:"msg"`
+		OK   bool   `json:"ok"`
+		Msg  string `json:"msg"`
+		Size int64  `json:"size"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("agent 回應解析失敗: %w", err)
+		return "", 0, fmt.Errorf("agent 回應解析失敗: %w", err)
 	}
 	if !result.OK {
-		return "", fmt.Errorf("%s", result.Msg)
+		return "", 0, fmt.Errorf("%s", result.Msg)
 	}
-	return result.Msg, nil
+	return result.Msg, result.Size, nil
 }
 
 // proxySyslogTest 將 journal 診斷測試委派給 agent 執行
@@ -603,12 +606,12 @@ func HandleSyslogRunDirect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return
 	}
-	msg, err := executeSyslogBackup(c)
+	msg, size, err := executeSyslogBackup(c)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "msg": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "msg": msg})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "msg": msg, "size": size})
 }
 
 // HandleSyslogTestDirect 供 agent POST /syslogs/test 路由使用（在 host 上執行診斷）
@@ -622,11 +625,11 @@ func HandleSyslogTestDirect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": allOK, "checks": checks})
 }
 
-func executeSyslogBackup(c SyslogConfig) (string, error) {
+func executeSyslogBackup(c SyslogConfig) (string, int64, error) {
 	date := time.Now().Format("2006-01-02")
 	destDir := filepath.Join(c.Dest, date)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return "", fmt.Errorf("建立目錄 %s 失敗: %w", destDir, err)
+		return "", 0, fmt.Errorf("建立目錄 %s 失敗: %w", destDir, err)
 	}
 
 	if c.SourceType == "journal" {
@@ -636,7 +639,7 @@ func executeSyslogBackup(c SyslogConfig) (string, error) {
 }
 
 // executeJournalBackup 使用 journalctl 匯出日誌
-func executeJournalBackup(c SyslogConfig, destDir, date string) (string, error) {
+func executeJournalBackup(c SyslogConfig, destDir, date string) (string, int64, error) {
 	outFmt := c.JournalFormat
 	if outFmt == "" {
 		outFmt = "short"
@@ -665,26 +668,33 @@ func executeJournalBackup(c SyslogConfig, destDir, date string) (string, error) 
 	cmd := exec.Command("journalctl", args...) //nolint:gosec
 	out, err := os.Create(destFile)            //nolint:gosec
 	if err != nil {
-		return "", fmt.Errorf("建立輸出檔案失敗: %w", err)
+		return "", 0, fmt.Errorf("建立輸出檔案失敗: %w", err)
 	}
 	defer out.Close()
 	cmd.Stdout = out
 	if cmdErr := cmd.Run(); cmdErr != nil {
-		return "", fmt.Errorf("journalctl 執行失敗: %w", cmdErr)
+		return "", 0, fmt.Errorf("journalctl 執行失敗: %w", cmdErr)
 	}
 
+	finalFile := destFile
 	if c.Compress {
 		if err := gzipFileBackup(destFile); err != nil {
-			return "", fmt.Errorf("壓縮 journal 失敗: %w", err)
+			return "", 0, fmt.Errorf("壓縮 journal 失敗: %w", err)
 		}
-		return fmt.Sprintf("journal 已備份至 %s.gz", destFile), nil
+		finalFile = destFile + ".gz"
 	}
-	return fmt.Sprintf("journal 已備份至 %s", destFile), nil
+	info, _ := os.Stat(finalFile)
+	var size int64
+	if info != nil {
+		size = info.Size()
+	}
+	return fmt.Sprintf("journal 已備份至 %s", finalFile), size, nil
 }
 
 // executeFileBackup 複製指定日誌檔案
-func executeFileBackup(c SyslogConfig, destDir, date string) (string, error) {
+func executeFileBackup(c SyslogConfig, destDir, date string) (string, int64, error) {
 	var copied []string
+	var totalSize int64
 	for _, logFile := range c.LogFiles {
 		if logFile == "" {
 			continue
@@ -692,18 +702,21 @@ func executeFileBackup(c SyslogConfig, destDir, date string) (string, error) {
 		basename := filepath.Base(logFile)
 		destFile := filepath.Join(destDir, basename+"_"+date)
 		if err := copyFileBackup(logFile, destFile); err != nil {
-			return "", fmt.Errorf("複製 %s 失敗: %w", logFile, err)
+			return "", 0, fmt.Errorf("複製 %s 失敗: %w", logFile, err)
 		}
+		finalFile := destFile
 		if c.Compress {
 			if err := gzipFileBackup(destFile); err != nil {
-				return "", fmt.Errorf("壓縮 %s 失敗: %w", destFile, err)
+				return "", 0, fmt.Errorf("壓縮 %s 失敗: %w", destFile, err)
 			}
-			copied = append(copied, destFile+".gz")
-		} else {
-			copied = append(copied, destFile)
+			finalFile = destFile + ".gz"
+		}
+		copied = append(copied, finalFile)
+		if info, err := os.Stat(finalFile); err == nil {
+			totalSize += info.Size()
 		}
 	}
-	return fmt.Sprintf("已備份 %d 個檔案至 %s", len(copied), destDir), nil
+	return fmt.Sprintf("已備份 %d 個檔案至 %s", len(copied), destDir), totalSize, nil
 }
 
 func copyFileBackup(src, dst string) error {

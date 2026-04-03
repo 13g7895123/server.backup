@@ -151,7 +151,7 @@ func (h *integratedHandler) runAll(w http.ResponseWriter, r *http.Request) {
 				h.pool.Exec(ctx, //nolint
 					`UPDATE syslog_configs SET run_status='running', run_message='', updated_at=NOW() WHERE id=$1`, id)
 				go func(cfg SyslogConfig) {
-					msg, runErr := executeSyslogBackup(cfg)
+					msg, _, runErr := executeSyslogBackup(cfg)
 					status := "success"
 					if runErr != nil {
 						status = "failed"
@@ -240,7 +240,7 @@ func (h *integratedHandler) batchRun(w http.ResponseWriter, r *http.Request) {
 			h.pool.Exec(ctx, //nolint
 				`UPDATE syslog_configs SET run_status='running', run_message='', updated_at=NOW() WHERE id=$1`, c.ID)
 			go func(cfg SyslogConfig) {
-				msg, runErr := executeSyslogBackup(cfg)
+				msg, _, runErr := executeSyslogBackup(cfg)
 				status := "success"
 				if runErr != nil {
 					status = "failed"

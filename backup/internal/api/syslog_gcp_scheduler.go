@@ -227,15 +227,16 @@ func (sch *SyslogGcpScheduler) runSyslogJob(id int) {
 	start := time.Now()
 
 	var msg string
+	var size int64
 	var runErr error
 	if c.SourceType == "journal" {
 		if agentURL := os.Getenv("AGENT_URL"); agentURL != "" {
-			msg, runErr = proxySyslogRun(agentURL, c)
+			msg, size, runErr = proxySyslogRun(agentURL, c)
 		} else {
-			msg, runErr = executeSyslogBackup(c)
+			msg, size, runErr = executeSyslogBackup(c)
 		}
 	} else {
-		msg, runErr = executeSyslogBackup(c)
+		msg, size, runErr = executeSyslogBackup(c)
 	}
 
 	status := "success"
@@ -257,6 +258,7 @@ func (sch *SyslogGcpScheduler) runSyslogJob(id int) {
 	if recID > 0 {
 		rec.ID = recID
 		rec.Status = status
+		rec.SizeBytes = size
 		rec.DurationSec = time.Since(start).Seconds()
 		rec.ErrorMsg = errStr
 		sch.store.UpdateRecord(ctx, rec) //nolint
