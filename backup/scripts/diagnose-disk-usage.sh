@@ -1,7 +1,6 @@
 #!/bin/bash
 # diagnose-disk-usage.sh — 診斷 /api/disk-usage 404 問題
 
-set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}[OK]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -16,83 +15,125 @@ echo ""
 echo "▶ [1] docker compose ps"
 docker compose ps
 
-# ── 2. 確認容器建立時間（太舊 = 未重建）────────────────────────────────────
+# ── 2. 確認容器建立時間 ────────────────────────────────────────────────────
 echo ""
-echo "▶ [2] 容器 Created 時間"
+echo "▶ [2] 容器 & Image 時間"
 CONTAINER=$(docker compose ps -q dashboard 2>/dev/null | head -1)
 if [[ -z "$CONTAINER" ]]; then
-  fail "找不到 dashboard 容器，請確認 docker compose ps"
+  fail "找不到 dashboard 容器"
   exit 1
 fi
 CREATED=$(docker inspect --format '{{.Created}}' "$CONTAINER")
-ok "dashboard 容器 ID: $CONTAINER"
-echo "   Created: $CREATED"
-
-# ── 3. 確認 image 建立時間 ────────────────────────────────────────────────────
-echo ""
-echo "▶ [3] Image 建立時間"
 IMAGE=$(docker inspect --format '{{.Image}}' "$CONTAINER")
 IMG_CREATED=$(docker inspect --format '{{.Created}}' "$IMAGE" 2>/dev/null || echo "unknown")
-echo "   Image: $IMAGE"
-echo "   Image Created: $IMG_CREATED"
+ok "Container Created : $CREATED"
+ok "Image    Created  : $IMG_CREATED"
 
-# ── 4. 在容器內直接呼叫 API（繞過 reverse proxy）──────────────────────────
+# ── 3. 取得 dashboard 對外 port ──────────────────────────────────────────────
 echo ""
-echo "▶ [4] 容器內部直接呼叫 /api/disk-usage（繞過 nginx/proxy）"
-INTERNAL=$(docker exec "$CONTAINER" wget -qO- http://localhost:8080/api/disk-usage 2>&1 || true)
-if echo "$INTERNAL" | grep -q "404"; then
-  fail "容器內部也 404 → 路由未正確註冊（image 是舊的）"
-  echo "   回應: $INTERNAL"
-elif echo "$INTERNAL" | grep -q "partitions\|collected_at"; then
-  ok "容器內部回應正常 → 問題在 reverse proxy"
-  echo "   回應片段: ${INTERNAL:0:200}"
+echo "▶ [3] 取得 dashboard 對外 port"
+HOST_PORT=$(docker inspect --format '{{range $p,$b := .NetworkSettings.Ports}}{{if $b}}{{(index $b 0).HostPort}}{{end}}{{end}}' "$CONTAINER" | head -1)
+if [[ -z "$HOST_PORT" ]]; then
+  HOST_PORT="8080"
+  warn "無法自動偵測 port，預設使用 $HOST_PORT"
 else
-  warn "未知回應: $INTERNAL"
+  ok "Dashboard port: $HOST_PORT"
 fi
 
-# ── 5. 確認 binary 是否包含 disk-usage 字串 ─────────────────────────────────
+# ── 4. 直接從 HOST 呼叫（最可靠，繞過所有 proxy）──────────────────────────
 echo ""
-echo "▶ [5] 檢查 binary 是否含有 disk-usage 路由字串"
-BINARY_CHECK=$(docker exec "$CONTAINER" sh -c 'strings /app/dashboard 2>/dev/null | grep "disk-usage" | head -5' 2>&1 || true)
-if [[ -z "$BINARY_CHECK" ]]; then
-  fail "binary 內找不到 'disk-usage' → binary 是舊版，需重建 image"
+echo "▶ [4] 從 HOST 直接呼叫 http://localhost:${HOST_PORT}/api/disk-usage"
+if command -v curl &>/dev/null; then
+  RESP=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${HOST_PORT}/api/disk-usage" 2>/dev/null)
+  BODY=$(curl -s "http://localhost:${HOST_PORT}/api/disk-usage" 2>/dev/null | head -c 200)
+  if [[ "$RESP" == "200" ]]; then
+    ok "HTTP $RESP → 路由存在，問題在 reverse proxy（nginx 設定）"
+    echo "   回應: $BODY"
+  elif [[ "$RESP" == "404" ]]; then
+    fail "HTTP $RESP → Go binary 沒有此路由，需要重建 image"
+    echo "   回應: $BODY"
+  else
+    warn "HTTP $RESP → 未知狀況"
+    echo "   回應: $BODY"
+  fi
 else
-  ok "binary 內找到 disk-usage 相關字串:"
-  echo "$BINARY_CHECK" | sed 's/^/   /'
+  warn "curl 不可用，嘗試 wget..."
+  RESP=$(wget -qO- "http://localhost:${HOST_PORT}/api/disk-usage" 2>/dev/null | head -c 200)
+  echo "   回應: $RESP"
 fi
 
-# ── 6. 確認環境變數 AGENT_URL ──────────────────────────────────────────────
+# ── 5. 確認 source code 是否存在（最關鍵）──────────────────────────────────
 echo ""
-echo "▶ [6] 環境變數 AGENT_URL"
-AGENT_URL=$(docker exec "$CONTAINER" sh -c 'echo $AGENT_URL' 2>/dev/null || true)
+echo "▶ [5] 確認 source code 是否包含 disk_usage.go"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SOURCE_FILE="$SCRIPT_DIR/internal/api/disk_usage.go"
+if [[ -f "$SOURCE_FILE" ]]; then
+  ok "找到 $SOURCE_FILE"
+  # 確認 RegisterDiskUsageRoute 函式存在
+  if grep -q "RegisterDiskUsageRoute" "$SOURCE_FILE"; then
+    ok "RegisterDiskUsageRoute 函式存在"
+  else
+    fail "RegisterDiskUsageRoute 函式不存在 → 檔案版本有誤"
+  fi
+else
+  fail "找不到 $SOURCE_FILE → source code 未同步到此伺服器！"
+  echo "   → 需要先將 disk_usage.go 複製/拉取到此伺服器，再重新 build"
+fi
+
+# ── 6. 確認 main.go 是否有呼叫 RegisterDiskUsageRoute ─────────────────────
+echo ""
+echo "▶ [6] 確認 cmd/dashboard/main.go 是否呼叫 RegisterDiskUsageRoute"
+MAIN_FILE="$SCRIPT_DIR/cmd/dashboard/main.go"
+if [[ -f "$MAIN_FILE" ]]; then
+  if grep -q "RegisterDiskUsageRoute" "$MAIN_FILE"; then
+    ok "main.go 有呼叫 RegisterDiskUsageRoute"
+  else
+    fail "main.go 沒有呼叫 RegisterDiskUsageRoute → 需要加入此呼叫再重建"
+  fi
+else
+  warn "找不到 $MAIN_FILE"
+fi
+
+# ── 7. 確認環境變數 AGENT_URL & 測試 agent ─────────────────────────────────
+echo ""
+echo "▶ [7] 環境變數 AGENT_URL & agent /disk-usage 測試"
+AGENT_URL=$(docker inspect --format '{{range .Config.Env}}{{.}}{{"\n"}}{{end}}' "$CONTAINER" | grep '^AGENT_URL=' | cut -d= -f2-)
 if [[ -z "$AGENT_URL" ]]; then
-  warn "AGENT_URL 未設定 → disk-usage 將直接在容器內執行 df"
+  warn "AGENT_URL 未設定 → disk-usage 直接在容器內執行 df"
 else
   ok "AGENT_URL=$AGENT_URL"
-  echo "   → disk-usage 會 proxy 到 agent"
-  echo "   測試 agent 連線..."
-  AGENT_RESP=$(docker exec "$CONTAINER" wget -qO- "${AGENT_URL}/disk-usage" 2>&1 || true)
-  if echo "$AGENT_RESP" | grep -q "partitions\|collected_at"; then
-    ok "Agent /disk-usage 回應正常"
-  else
-    fail "Agent /disk-usage 回應異常: $AGENT_RESP"
+  if command -v curl &>/dev/null; then
+    AGENT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${AGENT_URL}/disk-usage" 2>/dev/null)
+    AGENT_BODY=$(curl -s "${AGENT_URL}/disk-usage" 2>/dev/null | head -c 200)
+    if [[ "$AGENT_STATUS" == "200" ]]; then
+      ok "Agent /disk-usage HTTP $AGENT_STATUS → agent 正常"
+      echo "   回應: $AGENT_BODY"
+    else
+      fail "Agent /disk-usage HTTP $AGENT_STATUS"
+      echo "   回應: $AGENT_BODY"
+    fi
   fi
 fi
 
-# ── 7. 最近容器 log ───────────────────────────────────────────────────────────
+# ── 8. 最近容器 log ───────────────────────────────────────────────────────────
 echo ""
-echo "▶ [7] 最近 20 行容器 log"
+echo "▶ [8] 最近 20 行容器 log"
 docker logs --tail 20 "$CONTAINER" 2>&1
 
-# ── 8. 結論 ──────────────────────────────────────────────────────────────────
+# ── 9. 結論 ──────────────────────────────────────────────────────────────────
 echo ""
 echo "=========================================="
 echo " 結論"
 echo "=========================================="
-if [[ -z "$BINARY_CHECK" ]]; then
-  fail "需要重建 image："
+if [[ ! -f "$SOURCE_FILE" ]]; then
+  fail "source code 未同步！請先執行："
   echo ""
+  echo "   git pull   （或手動複製 internal/api/disk_usage.go）"
   echo "   docker compose build dashboard && docker compose up -d"
+elif ! grep -q "RegisterDiskUsageRoute" "$MAIN_FILE" 2>/dev/null; then
+  fail "main.go 缺少路由呼叫，請確認程式碼後重建"
 else
-  ok "image 是新的，請檢查上方的 proxy/agent 錯誤訊息"
+  echo "   source code 完整，請依 [4] 的結果判斷："
+  echo "   → HTTP 404 from localhost: docker compose build dashboard && docker compose up -d"
+  echo "   → HTTP 200 from localhost: 檢查 nginx/reverse proxy 設定"
 fi
