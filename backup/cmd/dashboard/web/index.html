@@ -199,6 +199,8 @@ select.form-input{width:auto}
       <div class="nav-item" data-p="schedules"><span class="ni">🗓</span>排程管理</div>
       <div class="nav-section">系統</div>
       <div class="nav-item" data-p="capabilities"><span class="ni">⚙️</span>系統功能</div>
+      <div class="nav-section">管理</div>
+      <div class="nav-item" data-p="admin"><span class="ni">🔧</span>系統管理</div>
     </nav>
   </aside>
   <div class="main">
@@ -3352,6 +3354,7 @@ function renderPage() {
   else if (currentPage === 'schedules') renderAllSchedules();
   else if (currentPage === 'capabilities') renderCapabilities();
   else if (currentPage === 'onlinesec') renderOnlineSec();
+  else if (currentPage === 'admin')     renderAdmin();
   else renderDashboard();
 }
 
@@ -3475,6 +3478,49 @@ function sshTypeBadge(type) {
   };
   const [cls, label] = map[type] || ['', type];
   return `<span class="badge ${cls}" style="font-size:12px">${label}</span>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Admin
+═══════════════════════════════════════════════════════════════ */
+function renderAdmin() {
+  setTitle('系統管理');
+  setContent(`
+    <div class="page-hdr">
+      <div class="page-hdr-left">
+        <h1>系統管理</h1>
+        <p>管理與維護功能</p>
+      </div>
+    </div>
+    <div class="card sg">
+      <div class="card-title">資料管理</div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2)">
+          <div>
+            <div style="font-weight:600;font-size:15px;margin-bottom:3px">匯出所有專案資料</div>
+            <div style="font-size:13px;color:var(--text2)">將所有專案（含備份目標、排程）以 JSON 格式下載，可用於備份設定或遷移</div>
+          </div>
+          <button class="btn btn-primary" onclick="adminExportAll()">⬇ 匯出 JSON</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function adminExportAll() {
+  try {
+    const data = await apiGet('/api/projects/export-all');
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.href = url;
+    a.download = `backup-projects-export-${ts}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('匯出成功', 'success');
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // Health check

@@ -80,6 +80,11 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	// /admin 重新導向至 SPA 的 #admin 頁面
+	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/#admin", http.StatusFound)
+	})
+
 	// 前端靜態檔案
 	webSub, err := fs.Sub(webFS, "web")
 	if err != nil {
