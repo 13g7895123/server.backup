@@ -404,18 +404,18 @@ func (h *apiKeyHandler) syslogDelete(w http.ResponseWriter, r *http.Request) {
 func syslogInfo(s *store.Store) func(http.ResponseWriter, *http.Request, int) {
 	return func(w http.ResponseWriter, r *http.Request, syslogID int) {
 		var cfg struct {
-			ID           int        `json:"id"`
-			Name         string     `json:"name"`
-			LogType      string     `json:"log_type"`
-			SourceType   string     `json:"source_type"`
-			Dest         string     `json:"dest"`
-			Compress     bool       `json:"compress"`
-			Enabled      bool       `json:"enabled"`
-			CronExpr     string     `json:"cron_expr"`
-			LastRunAt    *time.Time `json:"last_run_at"`
-			RunStatus    string     `json:"run_status"`
-			RunMessage   string     `json:"run_message"`
-			CreatedAt    time.Time  `json:"created_at"`
+			ID         int        `json:"id"`
+			Name       string     `json:"name"`
+			LogType    string     `json:"log_type"`
+			SourceType string     `json:"source_type"`
+			Dest       string     `json:"dest"`
+			Compress   bool       `json:"compress"`
+			Enabled    bool       `json:"enabled"`
+			CronExpr   string     `json:"cron_expr"`
+			LastRunAt  *time.Time `json:"last_run_at"`
+			RunStatus  string     `json:"run_status"`
+			RunMessage string     `json:"run_message"`
+			CreatedAt  time.Time  `json:"created_at"`
 		}
 		err := s.Pool().QueryRow(r.Context(), `
 			SELECT id, name, log_type, source_type, dest, compress, enabled,

@@ -574,15 +574,15 @@ func (s *Store) ValidateAPIKey(ctx context.Context, keyHash string) (int, error)
 
 // SyslogAPIKey 對應 syslog_api_keys 表
 type SyslogAPIKey struct {
-	ID          int        `json:"id"`
-	SyslogID    int        `json:"syslog_id"`
-	SyslogName  string     `json:"syslog_name,omitempty"`
-	Name        string     `json:"name"`
-	KeyPrefix   string     `json:"key_prefix"`
-	Enabled     bool       `json:"enabled"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
-	ExpiresAt   *time.Time `json:"expires_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID         int        `json:"id"`
+	SyslogID   int        `json:"syslog_id"`
+	SyslogName string     `json:"syslog_name,omitempty"`
+	Name       string     `json:"name"`
+	KeyPrefix  string     `json:"key_prefix"`
+	Enabled    bool       `json:"enabled"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 func (s *Store) ListSyslogAPIKeys(ctx context.Context, syslogID int) ([]SyslogAPIKey, error) {
@@ -656,13 +656,13 @@ func (s *Store) ValidateSyslogAPIKey(ctx context.Context, keyHash string) (int, 
 
 // SystemAPIKey 對應 system_api_keys 表（不含 key_hash）
 type SystemAPIKey struct {
-	ID          int        `json:"id"`
-	Name        string     `json:"name"`
-	KeyPrefix   string     `json:"key_prefix"`
-	Enabled     bool       `json:"enabled"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
-	ExpiresAt   *time.Time `json:"expires_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID         int        `json:"id"`
+	Name       string     `json:"name"`
+	KeyPrefix  string     `json:"key_prefix"`
+	Enabled    bool       `json:"enabled"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 func (s *Store) ListSystemAPIKeys(ctx context.Context) ([]SystemAPIKey, error) {

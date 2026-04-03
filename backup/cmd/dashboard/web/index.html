@@ -3944,15 +3944,59 @@ async function loadSystemAPIKeys() {
 }
 
 function showCreateSystemKey() {
-  const name = prompt('API Key 名稱（用途描述，例：Grafana 監控）');
-  if (!name || !name.trim()) return;
-  const exp = prompt('有效期限（輸入 30d / 90d / 365d，或留空表示永不過期）', '');
-  const body = { name: name.trim() };
-  if (exp && exp.trim()) body.expires_in = exp.trim();
-  apiPost('/api/admin/system-api-keys', body).then(k => {
-    alert(`API Key 建立成功！\n\n請立即複製，之後無法再查看：\n\n${k.key}`);
-    loadSystemAPIKeys();
-  }).catch(e => alert('建立失敗：' + (e.message || e)));
+  openModal('產生新系統 API Key', `
+    <div class="form-group">
+      <label class="form-label">Key 名稱 <span style="color:var(--danger)">*</span></label>
+      <input id="sysk-name" class="form-input" placeholder="例：Grafana 監控、外部整合">
+      <div class="form-hint">方便識別此 Key 的用途</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">有效期限</label>
+      <select id="sysk-exp" class="form-input">
+        <option value="">永不過期</option>
+        <option value="30d">30 天</option>
+        <option value="90d">90 天</option>
+        <option value="365d">365 天</option>
+      </select>
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="submitCreateSystemKey()">產生</button>
+  `);
+}
+
+async function submitCreateSystemKey() {
+  const name = document.getElementById('sysk-name')?.value.trim();
+  const exp  = document.getElementById('sysk-exp')?.value;
+  if (!name) { toast('請填寫 Key 名稱', 'warning'); return; }
+  try {
+    const res = await apiPost('/api/admin/system-api-keys', {
+      name,
+      expires_in: exp || null,
+    });
+    closeModal();
+    openModal('⚠️ 請複製並保存此 Key', `
+      <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius);padding:14px;margin-bottom:14px;font-size:13px;color:var(--warning)">
+        此 Key 只顯示一次，關閉後無法再查看！
+      </div>
+      <div class="form-group">
+        <label class="form-label">API Key</label>
+        <div style="display:flex;gap:8px">
+          <input id="sysk-show" class="form-input mono" value="${esc(res.key)}" readonly style="font-size:13px">
+          <button class="btn btn-secondary" onclick="copySystemKey()">複製</button>
+        </div>
+      </div>
+      <div style="font-size:13px;color:var(--text2);margin-top:8px">
+        使用方式：<code>Authorization: Bearer ${esc(res.key)}</code>
+      </div>
+    `, `<button class="btn btn-primary" onclick="closeModal();loadSystemAPIKeys()">我已複製，關閉</button>`);
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function copySystemKey() {
+  const el = document.getElementById('sysk-show');
+  if (!el) return;
+  navigator.clipboard.writeText(el.value).then(() => toast('已複製', 'success'));
 }
 
 async function revokeSystemKey(kid) {
