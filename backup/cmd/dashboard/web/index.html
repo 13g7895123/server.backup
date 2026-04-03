@@ -3493,6 +3493,15 @@ function renderAdmin() {
       </div>
     </div>
     <div class="card sg">
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>系統磁碟狀況</span>
+        <button class="btn btn-sm btn-secondary" onclick="loadDiskUsage()" id="disk-refresh-btn">↺ 重新整理</button>
+      </div>
+      <div id="disk-usage-panel">
+        <div class="loading"><div class="spinner"></div>載入中...</div>
+      </div>
+    </div>
+    <div class="card sg">
       <div class="card-title">資料管理</div>
       <div style="display:flex;flex-direction:column;gap:14px">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2)">
@@ -3606,6 +3615,8 @@ function renderAdmin() {
       </div>
     </div>
   `);
+  // 載入磁碟狀況
+  loadDiskUsage();
   // 載入專案下拉
   apiGet('/api/projects').then(projects => {
     const sel = document.getElementById('ak-project-sel');
@@ -3876,6 +3887,55 @@ async function deleteSyslogKey(kid) {
     toast('已刪除', 'success');
     refreshSyslogKeyTable();
   } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── 系統磁碟狀況 ──────────────────────────────────
+async function loadDiskUsage() {
+  const el = document.getElementById('disk-usage-panel');
+  const btn = document.getElementById('disk-refresh-btn');
+  if (!el) return;
+  el.innerHTML = '<div class="loading"><div class="spinner"></div>載入中...</div>';
+  if (btn) btn.disabled = true;
+  try {
+    const data = await apiGet('/api/disk-usage');
+    if (!data || !data.partitions || data.partitions.length === 0) {
+      el.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-icon">💽</div>無法取得磁碟資訊</div>';
+      return;
+    }
+    const ts = data.collected_at ? fmtDate(data.collected_at) : '';
+    el.innerHTML = `
+      ${ts ? `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">資料收集時間：${ts}</div>` : ''}
+      <div style="display:flex;flex-direction:column;gap:14px">
+        ${data.partitions.map(p => {
+          const pct = Math.min(100, Math.round(p.used_percent));
+          const color = pct >= 90 ? 'var(--danger)' : pct >= 75 ? 'var(--warning)' : 'var(--success)';
+          const totalGB = (p.total_bytes / 1073741824).toFixed(1);
+          const usedGB  = (p.used_bytes  / 1073741824).toFixed(1);
+          const freeGB  = (p.free_bytes  / 1073741824).toFixed(1);
+          return `<div style="padding:14px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div>
+                <span style="font-weight:600;font-size:14px">${esc(p.mount_point)}</span>
+                <span style="font-size:12px;color:var(--text3);margin-left:8px">${esc(p.filesystem)}</span>
+              </div>
+              <span style="font-weight:700;font-size:15px;color:${color}">${pct}%</span>
+            </div>
+            <div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden;margin-bottom:8px">
+              <div style="height:100%;width:${pct}%;background:${color};transition:width .4s"></div>
+            </div>
+            <div style="display:flex;gap:18px;font-size:12px;color:var(--text2)">
+              <span>已使用 <b style="color:var(--text)">${usedGB} GB</b></span>
+              <span>可用 <b style="color:var(--text)">${freeGB} GB</b></span>
+              <span>總計 <b style="color:var(--text)">${totalGB} GB</b></span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="empty" style="padding:24px"><div class="empty-icon">⚠️</div>${esc(e.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function adminExportAll() {

@@ -65,12 +65,12 @@ type GcpConfig struct {
 // ── handler ───────────────────────────────────────────────────────────────────
 
 type syslogHandler struct {
-	pool   *pgxpool.Pool
-	store  *store.Store
+	pool    *pgxpool.Pool
+	store   *store.Store
 	sgSched *SyslogGcpScheduler
 }
 type gcpHandler struct {
-	pool   *pgxpool.Pool
+	pool    *pgxpool.Pool
 	sgSched *SyslogGcpScheduler
 }
 

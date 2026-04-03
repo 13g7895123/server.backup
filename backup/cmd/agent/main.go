@@ -92,6 +92,9 @@ func main() {
 	// GET /ssh-audit  — host 直接查詢 journalctl，不需經過 Docker 容器
 	mux.HandleFunc("GET /ssh-audit", auth(api.HandleSSHAuditDirect))
 
+	// GET /disk-usage  — 回傳 host 磁碟分割區使用狀況
+	mux.HandleFunc("GET /disk-usage", auth(api.HandleDiskUsageDirect))
+
 	// POST /syslogs/run  — 接收 SyslogConfig JSON，在 host 上執行日誌備份（journalctl）
 	mux.HandleFunc("POST /syslogs/run", auth(api.HandleSyslogRunDirect))
 
