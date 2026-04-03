@@ -351,10 +351,17 @@ function statusBadge(s, msg = '') {
   return `<span class="badge ${map[s]||'badge-off'}" ${s==='failed'&&msg ? `title="${esc(msg)}"` : ''}>${labels[s]||esc(s)||'—'}</span>`;
 }
 
-function typeBadge(t) {
+function typeBadge(t, cfg = null) {
+  let displayType = t;
+  if (t === 'files' && cfg) {
+    try {
+      const c = typeof cfg === 'string' ? JSON.parse(cfg) : cfg;
+      if (c && c.is_db_backup) displayType = 'database';
+    } catch {}
+  }
   const map = { files:'badge-files', database:'badge-database', system:'badge-system', syslog:'badge-files', gcp:'badge-database' };
   const labels = { files:'檔案', database:'資料庫', system:'系統', syslog:'系統日誌', gcp:'GCP' };
-  return `<span class="badge ${map[t]||''}">${labels[t]||esc(t)}</span>`;
+  return `<span class="badge ${map[displayType]||''}">${labels[displayType]||esc(displayType)}</span>`;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1304,7 +1311,7 @@ async function renderTargetsTab(id) {
         <table>
           <thead><tr><th>類型</th><th>標籤</th><th>設定摘要</th><th>狀態</th><th style="text-align:right">操作</th></tr></thead>
           <tbody>${targets.map(t => `<tr>
-            <td>${typeBadge(t.type)}</td>
+            <td>${typeBadge(t.type, t.config)}</td>
             <td>${esc(t.label||'—')}</td>
             <td><span class="mono" style="font-size:11px;color:var(--text2)">${configSummary(t.type, t.config)}</span></td>
             <td><span class="badge ${t.enabled?'badge-on':'badge-off'}">${t.enabled?'啟用':'停用'}</span></td>
@@ -1322,7 +1329,7 @@ async function renderTargetsTab(id) {
 function configSummary(type, cfg) {
   try {
     const c = typeof cfg === 'string' ? JSON.parse(cfg) : cfg;
-    if (type === 'files') return c.source || '';
+    if (type === 'files') return (c.is_db_backup ? '[資料庫] ' : '') + (c.source || '');
     if (type === 'database') return `${c.db_type||''}@${c.host||''}:${c.port||''} / ${c.name||''}`;
     if (type === 'system') return (c.include||[]).join(', ');
   } catch { return ''; }
@@ -1381,6 +1388,9 @@ function targetConfigFields(type, cfg = {}) {
       <label class="form-label">排除清單（逗號分隔）</label>
       <input id="f-exclude" class="form-input" value="${esc((cfg.exclude||[]).join(', '))}" placeholder="*.tmp, cache/">
       <div class="form-hint">檔名或目錄名稱，支援萬用字元</div>
+    </div>
+    <div class="form-group">
+      <label class="form-check"><input type="checkbox" id="f-is-db" ${cfg.is_db_backup?'checked':''}> 此為資料庫備份（前台類型顯示為「資料庫」）</label>
     </div>`;
   if (type === 'database') return `
     <div class="form-group">
@@ -1459,7 +1469,7 @@ function buildTargetConfig(type) {
   const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
   const c = id => { const el = document.getElementById(id); return el ? el.checked : false; };
   const split = s => s.split(',').map(x=>x.trim()).filter(Boolean);
-  if (type === 'files')    return { source: v('f-source'), compress: 'gzip', exclude: split(v('f-exclude')) };
+  if (type === 'files')    return { source: v('f-source'), compress: 'gzip', exclude: split(v('f-exclude')), is_db_backup: c('f-is-db') };
   if (type === 'database') return { db_type: v('f-dbtype'), host: v('f-dbhost'), port: parseInt(v('f-dbport'))||5432, name: v('f-dbname'), user: v('f-dbuser'), password: v('f-dbpassword'), password_env: v('f-dbpass'), container_name: v('f-dbcontainer') };
   if (type === 'system')   return { include: split(v('f-include')), exclude: split(v('f-sys-exclude')), backup_packages: c('f-pkg'), backup_services: c('f-svc') };
   return {};
