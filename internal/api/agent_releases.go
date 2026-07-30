@@ -577,16 +577,9 @@ func buildReleaseFromCapability(ctx context.Context, releaseDir, version string,
 
 	checksumPath := filepath.Join(releaseDir, fmt.Sprintf("backup-agent_%s_checksums.txt", version))
 	logger.Printf("write checksums path=%s", checksumPath)
+	// Manifest 會記錄 checksum 檔本身的 hash，因此 checksum 不可再包含 manifest，
+	// 否則兩個檔案會形成無法收斂的循環雜湊。
 	checksumFiles := append([]agentReleaseFile{}, manifest.Files...)
-	manifestHash, manifestSize, err := sha256File(manifestPath)
-	if err != nil {
-		return nil, err
-	}
-	checksumFiles = append(checksumFiles, agentReleaseFile{
-		Name:      "manifest.json",
-		SizeBytes: manifestSize,
-		SHA256:    manifestHash,
-	})
 	if err := writeChecksums(checksumPath, checksumFiles); err != nil {
 		return nil, fmt.Errorf("寫入 checksums 失敗: %w", err)
 	}

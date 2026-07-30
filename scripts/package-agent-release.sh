@@ -217,10 +217,9 @@ append_checksum "${TAR_NAME}" "${RELEASE_DIR}/${TAR_NAME}"
 append_checksum "install-agent.sh" "${RELEASE_DIR}/install-agent.sh"
 append_checksum "diagnose-agent.sh" "${RELEASE_DIR}/diagnose-agent.sh"
 append_checksum "backup-agent.service" "${RELEASE_DIR}/backup-agent.service"
-append_checksum "manifest.json" "${MANIFEST_PATH}"
+# manifest 會記錄 checksums 檔案的 hash，不能反向再把 manifest 放入 checksums，
+# 否則形成循環雜湊，最終必定有一方驗證失敗。
 
-MANIFEST_SHA="$(sha256_file "${MANIFEST_PATH}")"
-MANIFEST_SIZE="$(size_file "${MANIFEST_PATH}")"
 CHECKSUM_SHA="$(sha256_file "${CHECKSUM_PATH}")"
 CHECKSUM_SIZE="$(size_file "${CHECKSUM_PATH}")"
 
