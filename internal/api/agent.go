@@ -98,6 +98,12 @@ func (h *agentHandler) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if body.DiskUsage != nil {
+		if err := h.store.UpsertAgentDiskUsage(r.Context(), agent.ID, body.DiskUsage); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	updated, err := h.store.GetAgent(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

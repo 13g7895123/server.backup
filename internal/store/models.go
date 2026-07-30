@@ -51,10 +51,28 @@ type Agent struct {
 }
 
 type AgentHeartbeat struct {
-	HostName  string `json:"host_name"`
-	IPAddress string `json:"ip_address"`
-	Version   string `json:"version"`
-	LastError string `json:"last_error"`
+	HostName  string             `json:"host_name"`
+	IPAddress string             `json:"ip_address"`
+	Version   string             `json:"version"`
+	LastError string             `json:"last_error"`
+	DiskUsage *DiskUsageSnapshot `json:"disk_usage,omitempty"`
+}
+
+// DiskPartition 代表 agent host 上一個磁碟分割區的使用狀況。
+type DiskPartition struct {
+	Filesystem  string  `json:"filesystem"`
+	MountPoint  string  `json:"mount_point"`
+	TotalBytes  int64   `json:"total_bytes"`
+	UsedBytes   int64   `json:"used_bytes"`
+	FreeBytes   int64   `json:"free_bytes"`
+	UsedPercent float64 `json:"used_percent"`
+}
+
+// DiskUsageSnapshot 是 dashboard 與 agent 共用的磁碟資訊格式。
+// Heartbeat 中此欄位為 optional，未升級的舊 agent 可繼續使用原有 payload。
+type DiskUsageSnapshot struct {
+	CollectedAt time.Time       `json:"collected_at"`
+	Partitions  []DiskPartition `json:"partitions"`
 }
 
 type NASTarget struct {

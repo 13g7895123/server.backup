@@ -450,6 +450,12 @@ func startHeartbeat(ctx context.Context, c *client.DashboardClient, commandCh ch
 			Version:   agentVersion(),
 			LastError: "",
 		}
+		diskUsage, err := api.CollectDiskUsageSnapshot()
+		if err != nil {
+			log.Printf("[agent] 收集磁碟資訊失敗: %v", err)
+		} else {
+			hb.DiskUsage = diskUsage
+		}
 		commands, err := c.Heartbeat(ctx, hb)
 		if err != nil {
 			log.Printf("[agent] heartbeat 失敗: %v", err)

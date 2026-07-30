@@ -63,6 +63,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		"021_projects_transfer_mode.sql",
 		"022_restore_records.sql",
 		"023_agent_commands.sql",
+		"024_agent_disk_usage.sql",
 	} {
 		path := "/app/migrations/" + name
 		sql, err := os.ReadFile(path)

@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,30 +14,32 @@ import (
 	"time"
 
 	"backup-manager/internal/store"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
 // DiskPartition 代表一個磁碟分割區的使用狀況
-type DiskPartition struct {
-	Filesystem  string  `json:"filesystem"`
-	MountPoint  string  `json:"mount_point"`
-	TotalBytes  int64   `json:"total_bytes"`
-	UsedBytes   int64   `json:"used_bytes"`
-	FreeBytes   int64   `json:"free_bytes"`
-	UsedPercent float64 `json:"used_percent"`
-}
+type DiskPartition = store.DiskPartition
 
 // DiskUsageResponse 是 /api/disk-usage 的回應結構
-type DiskUsageResponse struct {
-	CollectedAt time.Time       `json:"collected_at"`
-	Partitions  []DiskPartition `json:"partitions"`
+type DiskUsageResponse = store.DiskUsageSnapshot
+
+type projectDiskUsageResponse struct {
+	store.DiskUsageSnapshot
+	ExecutorType string `json:"executor_type"`
+	AgentID      *int   `json:"agent_id,omitempty"`
+	AgentName    string `json:"agent_name,omitempty"`
+	Source       string `json:"source"`
 }
 
 // ── handlers ──────────────────────────────────────────────────────────────────
 
 func RegisterDiskUsageRoute(mux *http.ServeMux, s *store.Store) {
 	mux.HandleFunc("GET /api/disk-usage", handleDiskUsage)
+	mux.HandleFunc("GET /api/projects/{id}/disk-usage", projectDiskUsageHandler(s))
+	mux.HandleFunc("GET /api/agents/{id}/disk-usage", agentDiskUsageHandler(s))
 	// 外部 API：需要 sys_ 前綴的系統 API Key
 	mux.HandleFunc("GET /api/v1/system/disk", systemKeyAuth(s, handleDiskUsage))
 }
@@ -79,21 +84,150 @@ func proxyDiskUsageToAgent(w http.ResponseWriter, r *http.Request, agentURL stri
 }
 
 func diskUsageCore(w http.ResponseWriter, r *http.Request) {
-	partitions, err := collectDiskUsage()
+	snapshot, err := CollectDiskUsageSnapshot()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "讀取磁碟狀況失敗: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, DiskUsageResponse{
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+// CollectDiskUsageSnapshot 收集 host 磁碟資訊，供 agent heartbeat 與 HTTP handler 共用。
+func CollectDiskUsageSnapshot() (*store.DiskUsageSnapshot, error) {
+	partitions, err := collectDiskUsage()
+	if err != nil {
+		return nil, err
+	}
+	return &store.DiskUsageSnapshot{
 		CollectedAt: time.Now(),
 		Partitions:  partitions,
+	}, nil
+}
+
+func projectDiskUsageHandler(s *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectID, err := pathID(r, "id")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "無效的 project id")
+			return
+		}
+		project, err := s.GetProject(r.Context(), projectID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "找不到專案")
+			return
+		}
+		if project.ExecutorType != "agent" {
+			snapshot, err := CollectDiskUsageSnapshot()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "讀取磁碟狀況失敗: "+err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, projectDiskUsageResponse{
+				DiskUsageSnapshot: *snapshot,
+				ExecutorType:      "local",
+				Source:            "dashboard",
+			})
+			return
+		}
+		if project.ExecutorAgentID == nil {
+			writeError(w, http.StatusConflict, "專案未指派 agent")
+			return
+		}
+		agent, err := s.GetAgent(r.Context(), *project.ExecutorAgentID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "找不到專案指派的 agent")
+			return
+		}
+		writeAgentDiskUsage(w, r, s, agent)
+	}
+}
+
+func agentDiskUsageHandler(s *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		agentID, err := pathID(r, "id")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "無效的 agent id")
+			return
+		}
+		agent, err := s.GetAgent(r.Context(), agentID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "找不到 agent")
+			return
+		}
+		writeAgentDiskUsage(w, r, s, agent)
+	}
+}
+
+func writeAgentDiskUsage(w http.ResponseWriter, r *http.Request, s *store.Store, agent *store.Agent) {
+	snapshot, err := s.GetAgentDiskUsage(r.Context(), agent.ID)
+	if err == nil {
+		writeJSON(w, http.StatusOK, projectDiskUsageResponse{
+			DiskUsageSnapshot: *snapshot,
+			ExecutorType:      "agent",
+			AgentID:           &agent.ID,
+			AgentName:         agent.Name,
+			Source:            "heartbeat",
+		})
+		return
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// 舊 agent 不會在 heartbeat 上報磁碟資訊；若 dashboard 可直接連入，
+	// 使用既有 /disk-usage endpoint 作為向後相容 fallback。
+	snapshot, err = fetchAgentDiskUsage(r.Context(), agent)
+	if err != nil {
+		writeError(w, http.StatusBadGateway,
+			"尚未收到 agent 磁碟資訊，且無法直接連線；請升級 agent 或確認 base_url: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, projectDiskUsageResponse{
+		DiskUsageSnapshot: *snapshot,
+		ExecutorType:      "agent",
+		AgentID:           &agent.ID,
+		AgentName:         agent.Name,
+		Source:            "agent-direct",
 	})
+}
+
+func fetchAgentDiskUsage(ctx context.Context, agent *store.Agent) (*store.DiskUsageSnapshot, error) {
+	if agent == nil || strings.TrimSpace(agent.BaseURL) == "" {
+		return nil, fmt.Errorf("agent base_url 未設定")
+	}
+	target := strings.TrimRight(agent.BaseURL, "/") + "/disk-usage"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	if agent.Code != "" {
+		req.Header.Set("X-Agent-Code", agent.Code)
+	}
+	if agent.TokenHash != "" {
+		req.Header.Set("X-Agent-Token", agent.TokenHash)
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("agent 回應 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var snapshot store.DiskUsageSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
+		return nil, fmt.Errorf("解析 agent 回應失敗: %w", err)
+	}
+	return &snapshot, nil
 }
 
 // collectDiskUsage 執行 df 並解析輸出
 func collectDiskUsage() ([]DiskPartition, error) {
-	// -P：POSIX 格式；-B1：以 byte 為單位
-	out, err := exec.Command("df", "-PB1", "--output=source,target,size,used,avail,pcent").Output() //nolint:gosec
+	// --output：固定欄位順序；-B1：以 byte 為單位。
+	// GNU df 的 -P 與 --output 互斥，因此只在 fallback 使用 -P。
+	out, err := exec.Command("df", "-B1", "--output=source,target,size,used,avail,pcent").Output() //nolint:gosec
 	if err != nil {
 		// fallback：某些舊版 df 不支援 --output
 		out, err = exec.Command("df", "-PB1").Output() //nolint:gosec

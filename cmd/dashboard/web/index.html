@@ -4191,10 +4191,19 @@ function renderAdmin() {
       <div id="agent-releases-panel"><div class="loading"><div class="spinner"></div>載入中...</div></div>
     </div>
     <div class="card sg">
-      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
-        <span>系統磁碟狀況</span>
-        <button class="btn btn-sm btn-secondary" onclick="loadDiskUsage()" id="disk-refresh-btn">↺ 重新整理</button>
+      <div class="card-title">系統磁碟狀況</div>
+      <div class="inline-filters" style="margin-bottom:14px">
+        <div class="inline-filter" style="min-width:min(100%,360px)">
+          <label class="form-label" for="disk-usage-target">資料來源</label>
+          <select id="disk-usage-target" class="form-input" onchange="resetAdminListPage('diskUsage');loadDiskUsage()">
+            <option value="dashboard">Dashboard 主機</option>
+          </select>
+        </div>
+        <div class="inline-filter compact">
+          <button class="btn btn-sm btn-secondary" onclick="loadDiskUsage()" id="disk-refresh-btn">↺ 重新整理</button>
+        </div>
       </div>
+      <div id="disk-usage-context" style="margin-bottom:12px"></div>
       <div id="disk-usage-panel">
         <div class="loading"><div class="spinner"></div>載入中...</div>
       </div>
@@ -4334,8 +4343,8 @@ function renderAdmin() {
   loadAgentCommands();
   loadAgentReleaseCapability();
   loadAgentReleases();
-  // 載入磁碟狀況
-  loadDiskUsage();
+  // 載入 dashboard 與各 agent VM 的磁碟狀況選項
+  loadDiskUsageTargets();
   // 載入系統 API Key 清單
   loadSystemAPIKeys();
   // 載入專案下拉
@@ -5588,15 +5597,83 @@ async function deleteSystemKey(kid) {
 }
 
 // ── 系統磁碟狀況 ──────────────────────────────────
+async function loadDiskUsageTargets() {
+  const sel = document.getElementById('disk-usage-target');
+  if (!sel) return;
+  const selected = sel.value || 'dashboard';
+  try {
+    const [agents, projects] = await Promise.all([
+      apiGet('/api/agents'),
+      apiGet('/api/projects')
+    ]);
+    const uploadAgentIds = new Set(
+      (projects || [])
+        .filter(project => project.executor_type === 'agent' && project.transfer_mode === 'upload' && project.executor_agent_id)
+        .map(project => Number(project.executor_agent_id))
+    );
+    sel.innerHTML = '<option value="dashboard">Dashboard 主機</option>';
+    (agents || []).forEach(agent => {
+      const option = document.createElement('option');
+      option.value = `agent:${agent.id}`;
+      const status = agent.status === 'online' ? 'online' : (agent.status || 'offline');
+      const uploadOnly = uploadAgentIds.has(Number(agent.id));
+      option.textContent = `${agent.name || agent.code} (${agent.code})${uploadOnly ? ' · upload 模式' : ''} · ${status}`;
+      option.dataset.agentName = agent.name || agent.code || `Agent ${agent.id}`;
+      option.dataset.agentCode = agent.code || '';
+      option.dataset.agentStatus = status;
+      option.dataset.transferMode = uploadOnly ? 'upload' : '';
+      sel.appendChild(option);
+    });
+    if ([...sel.options].some(option => option.value === selected)) sel.value = selected;
+  } catch(e) {
+    toast(`載入 Agent 磁碟選項失敗：${e.message}`, 'warning');
+  }
+  loadDiskUsage();
+}
+
 async function loadDiskUsage() {
   const el = document.getElementById('disk-usage-panel');
+  const contextEl = document.getElementById('disk-usage-context');
+  const targetEl = document.getElementById('disk-usage-target');
   const btn = document.getElementById('disk-refresh-btn');
   if (!el) return;
   el.innerHTML = '<div class="loading"><div class="spinner"></div>載入中...</div>';
+  if (contextEl) contextEl.innerHTML = '';
   if (btn) btn.disabled = true;
   try {
-    const data = await apiGet('/api/disk-usage');
-    if (!data || !data.partitions || data.partitions.length === 0) {
+    const target = targetEl?.value || 'dashboard';
+    const agentId = target.startsWith('agent:') ? Number(target.slice(6)) : 0;
+    const data = await apiGet(agentId ? `/api/agents/${agentId}/disk-usage` : '/api/disk-usage');
+    if (!data) {
+      el.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-icon">💽</div>無法取得磁碟資訊</div>';
+      return;
+    }
+    const selectedOption = targetEl?.selectedOptions?.[0];
+    const agentName = data.agent_name || selectedOption?.dataset?.agentName || '';
+    const agentCode = selectedOption?.dataset?.agentCode || '';
+    const agentStatus = selectedOption?.dataset?.agentStatus || '';
+    const transferMode = selectedOption?.dataset?.transferMode || '';
+    const sourceLabels = {
+      heartbeat: 'Agent heartbeat',
+      'agent-direct': 'Agent 即時查詢',
+      dashboard: 'Dashboard 本機'
+    };
+    const source = data.source || (agentId ? 'heartbeat' : 'dashboard');
+    const collectedAt = data.collected_at ? new Date(data.collected_at) : null;
+    const stale = collectedAt && (Date.now() - collectedAt.getTime()) > 120000;
+    if (contextEl) {
+      const statusColor = agentStatus === 'online' ? 'var(--success)' : 'var(--warning)';
+      contextEl.innerHTML = `
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);font-size:12px;color:var(--text2)">
+          <span style="font-weight:700;color:var(--text)">${agentId ? esc(agentName || `Agent ${agentId}`) : 'Dashboard 主機'}</span>
+          ${agentCode ? `<span class="mono">${esc(agentCode)}</span>` : ''}
+          ${transferMode === 'upload' ? '<span style="padding:2px 7px;border-radius:999px;background:var(--primary-light);color:var(--primary);font-weight:600">upload 模式</span>' : ''}
+          ${agentStatus ? `<span style="color:${statusColor}">● ${esc(agentStatus)}</span>` : ''}
+          <span>來源：${esc(sourceLabels[source] || source)}</span>
+          ${stale ? '<span style="color:var(--warning);font-weight:600">⚠ 資料超過 2 分鐘未更新</span>' : ''}
+        </div>`;
+    }
+    if (!data.partitions || data.partitions.length === 0) {
       el.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-icon">💽</div>無法取得磁碟資訊</div>';
       return;
     }

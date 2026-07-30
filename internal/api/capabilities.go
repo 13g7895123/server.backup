@@ -171,6 +171,8 @@ func HandleCapabilities(w http.ResponseWriter, r *http.Request) {
 					{"PATCH", "/api/projects/{id}/schedules/{sid}/toggle", "啟用/停用排程"},
 					{"GET", "/api/projects/{id}/retention", "取得保留政策"},
 					{"PUT", "/api/projects/{id}/retention", "更新保留政策"},
+					{"GET", "/api/projects/{id}/disk-usage", "取得專案執行主機的磁碟使用狀況"},
+					{"GET", "/api/agents/{id}/disk-usage", "取得指定 agent 主機的磁碟使用狀況"},
 					{"GET", "/api/backups", "列出備份紀錄（支援篩選/分頁）"},
 					{"GET", "/api/projects/{id}/backups", "特定專案備份紀錄"},
 					{"DELETE", "/api/backups/{bid}", "刪除備份紀錄與實體檔案"},
